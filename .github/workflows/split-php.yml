@@ -2,8 +2,8 @@
 # package is mirrored from packages/php into its own repository,
 # prodbat/prodbat-php, which is the one submitted to Packagist.
 #
-# Runs in the public repository only. It needs a secret, PHP_SPLIT_TOKEN: a
-# fine-grained GitHub token with "Contents: read and write" on prodbat-php.
+# Runs in the public repository only. It needs a secret, PHP_SPLIT_KEY: the
+# private half of an SSH deploy key that has write access to prodbat-php.
 #
 # Releasing a PHP version: push a tag here named php-v1.2.3; it arrives in
 # prodbat-php as v1.2.3, and Packagist picks it up.
@@ -27,11 +27,14 @@ jobs:
 
       - name: Split packages/php and push it
         env:
-          TOKEN: ${{ secrets.PHP_SPLIT_TOKEN }}
+          KEY: ${{ secrets.PHP_SPLIT_KEY }}
         run: |
           set -euo pipefail
+          install -m 600 /dev/null ~/split_key
+          printf '%s\n' "$KEY" > ~/split_key
+          export GIT_SSH_COMMAND="ssh -i ~/split_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
           sha=$(git subtree split --prefix=packages/php HEAD)
-          remote="https://x-access-token:${TOKEN}@github.com/prodbat/prodbat-php.git"
+          remote="git@github.com:prodbat/prodbat-php.git"
           git push "$remote" "${sha}:refs/heads/main" --force
           if [[ "$GITHUB_REF" == refs/tags/php-v* ]]; then
             version="${GITHUB_REF#refs/tags/php-}"
