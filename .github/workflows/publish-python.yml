@@ -1,0 +1,45 @@
+# Publishes packages/python to PyPI through trusted publishing (no token):
+# PyPI trusts this workflow, in the "pypi" environment of prodbat/prodbat.
+#
+# Releasing: set the version in packages/python/pyproject.toml and
+# prodbat/__init__.py, then push a tag named python-v1.2.3 to match.
+name: Publish the Python package
+
+on:
+  push:
+    tags: ["python-v*"]
+
+jobs:
+  publish:
+    if: github.repository == 'prodbat/prodbat'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: packages/python
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Check the tag matches the version
+        run: |
+          tag="${GITHUB_REF_NAME#python-v}"
+          version=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match version $version in pyproject.toml" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: uv run --no-project --with pytest --with fastapi --with httpx --with . python -m pytest -q
+
+      - name: Build
+        run: uv build
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/python/dist/
