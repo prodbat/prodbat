@@ -1,0 +1,38 @@
+# Self-hosting Prodbat: one container and Postgres.
+#
+#   cp .env.example .env      # then edit it
+#   docker compose up -d
+#   docker compose exec prodbat python -m prodbat_server add-site yourapp.com --email you@example.com
+#
+# Put a reverse proxy with HTTPS in front of port 8000 (Caddy, nginx, or
+# your host's own) and set PRODBAT_PROXY_HOPS to match.
+services:
+  prodbat:
+    build: ./server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      PRODBAT_DATABASE_URL: postgresql+psycopg://prodbat:${POSTGRES_PASSWORD}@db/prodbat
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: prodbat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: prodbat
+    volumes:
+      - prodbat-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prodbat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  prodbat-db:

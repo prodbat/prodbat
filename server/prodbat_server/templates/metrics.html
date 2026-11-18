@@ -1,0 +1,19 @@
+{% extends "explore.html" %}
+{% block title %}Metrics{% endblock %}
+{% block main %}
+<div class="bar">
+<h1>Metrics <span class="muted">the last {{ range }}</span></h1>
+{% set qs = '' %}{% include "_ranges.html" %}
+</div>
+<section class="card stats">
+{% for label, value in stats %}<div><span class="muted">{{ label }}</span><b>{{ value }}</b></div>{% endfor %}
+</section>
+<div class="grid">
+{% if revenue %}<section class="card scroll" style="grid-column: 1 / -1"><h2>Revenue by source</h2>
+<table><thead><tr><th>Where buyers came from</th><th class="num">Payments</th><th class="num">Amount</th></tr></thead>
+<tbody>{% for r in revenue %}<tr><td>{{ r.source }}</td><td class="num">{{ r.count }}</td><td class="num">{{ r.amount }}</td></tr>{% endfor %}</tbody></table>
+<p class="muted">"Not traced" payments had no page-load reference: pass <span class="mono">window.prodbat.ref</span> to Stripe as <span class="mono">client_reference_id</span>.</p></section>{% endif %}
+{% for title, chart in charts %}<section class="card"><h2>{{ title }}</h2>{{ chart }}</section>
+{% endfor %}
+</div>
+{% endblock %}

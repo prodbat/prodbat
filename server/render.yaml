@@ -1,0 +1,59 @@
+# Self-hosted Prodbat on Render: the server, its worker and Postgres.
+# In the Render dashboard: New > Blueprint, pick this repository, and set the
+# Blueprint path to server/render.yaml. About $14 a month on the smallest plans.
+
+databases:
+  - name: prodbat-db
+    plan: basic-256mb
+    databaseName: prodbat
+
+envVarGroups:
+  - name: prodbat
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: PRODBAT_PUBLIC_URL
+        sync: false            # the address of this service, such as https://prodbat-xxxx.onrender.com
+      - key: PRODBAT_PROXY_HOPS
+        value: "1"
+      - key: PRODBAT_ADMIN_TOKEN
+        generateValue: true    # for `npx prodbat init --server <url> --token <this>`
+      - key: PRODBAT_MAIL_FROM
+        sync: false
+      - key: PRODBAT_SMTP_HOST
+        sync: false
+      - key: PRODBAT_SMTP_USER
+        sync: false
+      - key: PRODBAT_SMTP_PASSWORD
+        sync: false
+
+services:
+  - type: web
+    name: prodbat
+    runtime: python
+    plan: starter
+    rootDir: server
+    buildCommand: pip install uv==0.13.0 && uv sync --frozen --no-dev
+    preDeployCommand: uv run --no-sync python -m prodbat_server migrate
+    startCommand: uv run --no-sync python -m prodbat_server serve
+    healthCheckPath: /healthz
+    envVars:
+      - fromGroup: prodbat
+      - key: PRODBAT_DATABASE_URL
+        fromDatabase:
+          name: prodbat-db
+          property: connectionString
+
+  - type: worker
+    name: prodbat-worker
+    runtime: python
+    plan: starter
+    rootDir: server
+    buildCommand: pip install uv==0.13.0 && uv sync --frozen --no-dev
+    startCommand: uv run --no-sync python -m prodbat_server worker
+    envVars:
+      - fromGroup: prodbat
+      - key: PRODBAT_DATABASE_URL
+        fromDatabase:
+          name: prodbat-db
+          property: connectionString

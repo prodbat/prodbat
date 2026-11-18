@@ -1,0 +1,15 @@
+{% extends "explore.html" %}
+{% block title %}New secret key{% endblock %}
+{% block main %}
+<h1>A new secret key for {{ domain }}</h1>
+<p>The old key has stopped working. Copy this now: it can't be shown again.</p>
+<pre id="key">{{ secret }}</pre>
+<div><button type="button" data-copy="key">Copy the key</button></div>
+<section class="card">
+<h2>Then tell your coding agent</h2>
+<pre id="agent">Prodbat's secret key for this project has changed. Replace PRODBAT_KEY in .env with the new value I give you, update PRODBAT_KEY in the host's environment variables, redeploy, then run npx prodbat verify.</pre>
+<div><button type="button" data-copy="agent">Copy</button></div>
+<p class="muted">Until the host has the new key, your server's error reports and job check-ins are refused. Visits from the script keep counting: they use the public site key, which hasn't changed.</p>
+</section>
+<p><a href="/d/{{ token }}">Back to the page</a></p>
+{% endblock %}

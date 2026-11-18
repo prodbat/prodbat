@@ -1,0 +1,26 @@
+{% extends "explore.html" %}
+{% block title %}Jobs{% endblock %}
+{% block main %}
+<div class="bar">
+<h1>Jobs and queues</h1>
+{% set qs = '' %}{% include "_ranges.html" %}
+</div>
+<section class="card scroll">
+<h2>Scheduled jobs</h2>
+{% if jobs %}
+<table>
+<thead><tr><th>Job</th><th>Runs every</th><th>Last checked in</th><th>State</th></tr></thead>
+<tbody>{% for j in jobs %}<tr><td class="mono">{{ j.name }}</td><td>{{ (j.every // 3600) ~ ' h' if j.every >= 3600 else (j.every // 60) ~ ' min' }}</td><td class="muted">{{ j.last }}</td><td><span class="tag {{ 'red' if j.late else 'green' }}">{{ 'Late' if j.late else 'On time' }}</span></td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="empty">No scheduled jobs report in yet: <span class="mono">npx prodbat suggestions S-02</span>.</p>{% endif %}
+</section>
+{% for q in queues %}
+<section class="card">
+<div class="bar"><h2>{{ q.system }} · <span class="mono">{{ q.name }}</span></h2>
+<span class="muted">{% if q.latest %}now {{ q.latest.waiting if q.latest.waiting is not none else '?' }} waiting{% if q.latest.oldest_seconds %}, oldest {{ (q.latest.oldest_seconds // 60) }} min{% endif %}{% endif %}</span></div>
+<div class="grid"><div><span class="muted">Waiting</span>{{ q.chart }}</div><div><span class="muted">Done and failed</span>{{ q.throughput }}</div></div>
+</section>
+{% else %}
+<section class="card"><h2>Queues</h2><p class="empty">No queues report in yet: <span class="mono">npx prodbat suggestions S-06</span>.</p></section>
+{% endfor %}
+{% endblock %}

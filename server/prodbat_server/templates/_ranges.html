@@ -1,0 +1,1 @@
+<span class="ranges" role="group" aria-label="Time range">{% for r in ranges %}<a href="?{{ qs }}range={{ r }}"{% if r == range %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</span>

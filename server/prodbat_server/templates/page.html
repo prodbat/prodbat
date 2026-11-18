@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>{{ page.sentence }} {{ page.domain }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root { --ground: #F4F5F1; --card: #FFFFFF; --ink: #15181B; --muted: #555C63; --line: #DADDD5; --soft-line: #ECEEE8;
+  --green: #1B7245; --green-tint: #E3F1E8; --red: #B93A0B; --red-tint: #FBE8DE; --amber: #7A5200; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.5 Inter, system-ui, sans-serif; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+header.wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding-top: 20px; padding-bottom: 20px; }
+header .site { font-weight: 600; font-size: 17px; }
+nav.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); width: 100%; font-size: 15px; }
+nav.tabs a { padding: 10px 14px; text-decoration: none; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+nav.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); }
+.muted { color: var(--muted); font-size: 14px; }
+main.wrap { display: flex; flex-direction: column; gap: 40px; padding-top: 28px; padding-bottom: 64px; }
+.notice { background: var(--green-tint); color: #123F28; border-radius: 10px; padding: 12px 16px; font-weight: 500; }
+.status { display: flex; align-items: flex-start; gap: 22px; padding: 20px 0 8px; }
+.status svg { flex: none; margin-top: 4px; }
+.status h1 { margin: 0 0 8px; font: 700 clamp(38px, 5.4vw, 68px)/1.02 'Bricolage Grotesque', Inter, sans-serif; letter-spacing: -0.025em; }
+.status p { margin: 0; font-size: 17px; color: var(--muted); }
+.broken h1 { color: var(--red); }
+.look h1 { color: var(--amber); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.alarm { border: 2px solid var(--red); border-radius: 16px; padding: 28px 30px; display: flex; flex-direction: column; gap: 16px; }
+.alarm h2 { font: 700 30px/1.1 'Bricolage Grotesque', Inter, sans-serif; letter-spacing: -0.02em; }
+.alarm p { margin: 0; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+button { font: inherit; font-size: 16px; font-weight: 600; min-height: 48px; padding: 0 22px; border-radius: 10px; cursor: pointer; background: transparent; color: var(--ink); border: 1.5px solid var(--ink); }
+button.primary { background: var(--ink); color: #FFF; border-color: var(--ink); }
+button.quiet { border: 0; padding: 0 8px; min-height: 44px; font-size: 14px; font-weight: 500; color: var(--muted); text-decoration: underline; }
+form { margin: 0; }
+.numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); overflow: hidden; }
+.numbers div { padding: 22px 24px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--soft-line); border-bottom: 1px solid var(--soft-line); margin: 0 -1px -1px 0; }
+.numbers b { font: 700 38px/1.1 'Bricolage Grotesque', Inter, sans-serif; letter-spacing: -0.02em; }
+.lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); gap: 24px 48px; }
+.lists.cards { gap: 24px; }
+.list { padding: 24px 26px; display: flex; flex-direction: column; gap: 14px; }
+.plain { display: flex; flex-direction: column; gap: 12px; }
+.list-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.rows { display: flex; flex-direction: column; }
+.row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--soft-line); }
+.row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.row b { font-weight: 500; white-space: nowrap; }
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; }
+.problem { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--soft-line); }
+.problem svg { flex: none; margin-top: 1px; }
+.problem > div { min-width: 0; overflow-wrap: anywhere; }
+.problem strong { font-weight: 600; }
+.nothing { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--green-tint); color: #123F28; font-weight: 500; border-radius: 10px; }
+.empty { margin: 0; color: var(--muted); font-size: 15px; }
+pre { margin: 0; background: var(--ink); color: #E9ECE6; border-radius: 10px; padding: 16px 18px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 'JetBrains Mono', ui-monospace, monospace; }
+.event { display: flex; gap: 20px; padding: 12px 0; border-top: 1px solid var(--line); }
+.event .muted { flex: 0 0 58px; font-size: 16px; }
+.item { padding: 12px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+a { color: var(--ink); }
+.paused { background: #FFF4DB; color: #5A3D00; border-radius: 10px; padding: 12px 16px; font-weight: 500; margin: 0; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.steps li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--soft-line); }
+.steps li svg { flex: none; margin-top: 1px; }
+.steps li > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.steps .done { color: var(--muted); }
+button.small { min-height: 40px; padding: 0 14px; font-size: 14px; align-self: flex-start; }
+code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.9em; }
+#texts input { font: inherit; min-height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid #B9BEB3; background: #FFF; min-width: min(260px, 100%); }
+footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
+</style>
+</head>
+<body>
+{% macro tick(size) %}<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="18" fill="#1B7245"/><path d="M10.5 18.5 L15.8 23.5 L25.5 12.8" fill="none" stroke="#FFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>{% endmacro %}
+{% macro cross(size) %}<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="8" fill="#B93A0B"/><path d="M12 12 L24 24 M24 12 L12 24" fill="none" stroke="#FFF" stroke-width="3.2" stroke-linecap="round"/></svg>{% endmacro %}
+{% macro warn(size) %}<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 36 36" aria-hidden="true"><path d="M18 2 L35 33 H1 Z" fill="#7A5200"/><path d="M18 13 V22 M18 27 V27.5" fill="none" stroke="#FFF" stroke-width="3.2" stroke-linecap="round"/></svg>{% endmacro %}
+{% macro ring(size) %}<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.5" fill="#FFF" stroke="#555C63" stroke-width="3"/></svg>{% endmacro %}
+{% macro copy_button(target, label, class="") %}<button type="button" class="{{ class }}" data-copy="{{ target }}">{{ label }}</button>{% endmacro %}
+
+<header class="wrap">
+<svg width="26" height="24" viewBox="0 0 26 24" role="img" aria-label="Prodbat"><path d="M2 3 L8 9 L13 6 L18 9 L24 3 V17 a5 5 0 0 1 -5 5 H7 a5 5 0 0 1 -5 -5 Z" fill="#15181B"/></svg>
+<span class="site">{{ page.domain }}</span>
+{% if page.status != 'waiting' %}<span class="muted">The last 7 days</span>{% endif %}
+<nav class="tabs" aria-label="Views">
+<a href="/d/{{ token }}" aria-current="page">Overview</a>
+{% for key, label in (('errors', 'Errors'), ('logs', 'Logs'), ('metrics', 'Metrics'), ('uptime', 'Uptime'), ('jobs', 'Jobs'), ('packages', 'Packages')) %}<a href="/d/{{ token }}/{{ key }}">{{ label }}</a>{% endfor %}
+</nav>
+</header>
+
+<main class="wrap">
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+
+<section class="status {{ page.status }}">
+{% if page.status == 'broken' %}{{ cross(64) }}{% elif page.status == 'look' %}{{ warn(64) }}{% elif page.status == 'working' %}{{ tick(64) }}{% else %}{{ ring(64) }}{% endif %}
+<div><h1>{{ page.sentence }}</h1><p>{{ page.proof }}</p></div>
+</section>
+
+{% if paused %}
+<p class="paused" role="status">Monitoring is paused, so nothing on {{ page.domain }} is being checked, stored or emailed.</p>
+{% endif %}
+
+{% if page.status == 'waiting' %}
+<section class="card list" data-waiting>
+<h2>Setting up {{ page.domain }}</h2>
+<ul class="steps">
+{% for step in setup[:5] %}<li>{% if step.done %}{{ tick(22) }}{% else %}{{ ring(22) }}{% endif %}<div><span{% if step.done %} class="done"{% endif %}>{{ step.what }}</span>
+{% if not step.done and step.test and alert_email %}<form method="post" action="/d/{{ token }}/test-alert"><button class="small">Send a test alert</button></form>
+{% elif not step.done and step.how %}<span class="muted">{{ step.how }}</span>{% endif %}</div></li>
+{% endfor %}
+</ul>
+<p class="muted">This page updates by itself. You can close it; {% if alert_email %}we'll email {{ alert_email }} when the first visit arrives{% else %}it will be here when you come back{% endif %}.</p>
+</section>
+{% if stalled %}
+<section class="card list">
+<h2>Still waiting</h2>
+<p>Usually the change isn't deployed yet, or <code>PRODBAT_KEY</code> isn't set in your host's environment variables. Paste this into your coding agent:</p>
+<pre id="verify">Run npx prodbat verify and fix what it reports.</pre>
+<div class="actions">{{ copy_button('verify', 'Copy', 'primary') }}</div>
+</section>
+{% endif %}
+<section class="card list">
+<h2>Installing by hand? Add this to every page of {{ page.domain }}</h2>
+<pre id="tag">{{ script_tag }}</pre>
+<div class="actions">{{ copy_button('tag', 'Copy') }}<span class="muted">It is one small file. It sets no cookies and stores nothing in the browser.</span></div>
+</section>
+{% else %}
+
+{% if unfinished %}
+<section class="card list finish" data-finish="{{ token[:8] }}">
+<div class="list-head"><h2>Finish setting up</h2><button type="button" class="quiet" data-dismiss>Hide this</button></div>
+<p class="muted">{{ setup | selectattr('done') | list | length }} of {{ setup | length }} done. Each one is a line to paste into your coding agent.</p>
+<ul class="steps">
+{% for step in unfinished %}<li>{{ ring(22) }}<div><span>{{ step.what }}</span>
+{% if step.test and alert_email %}<form method="post" action="/d/{{ token }}/test-alert"><button class="small">Send a test alert</button></form>
+{% elif step.how %}<span class="mono">{{ step.how }}</span>{% endif %}</div></li>
+{% endfor %}
+</ul>
+</section>
+{% endif %}
+
+{% if broken %}
+<section class="card alarm">
+<h2>{{ broken.title }}</h2>
+<p>{{ broken.detail }}</p>
+{% if broken.todo %}<p>{{ broken.todo }}</p>{% else %}<p>Paste this into your coding agent, or roll back your last deploy.</p>{% endif %}
+<pre id="prompt">{{ prompt }}</pre>
+<div class="actions">
+{{ copy_button('prompt', 'Copy this for your coding agent', 'primary') }}
+<form method="post" action="/d/{{ token }}/mute/{{ broken.id }}"><button class="quiet">This is fine, stop telling me</button></form>
+</div>
+</section>
+{% endif %}
+
+<section class="card numbers" aria-label="This week in numbers">
+{% for n in page.numbers %}<div><span class="muted">{{ n.label }}</span><b>{{ n.value }}</b><span class="muted">{{ n.note }}</span></div>
+{% endfor %}
+</section>
+
+<section class="lists cards">
+<div class="card list">
+<h2>What is broken</h2>
+{% if page.problems %}
+<div class="rows">
+{% for problem in page.problems %}<div class="problem">{% if problem.level == 'broken' %}{{ cross(22) }}{% elif problem.level == 'look' %}{{ warn(22) }}{% else %}{{ ring(22) }}{% endif %}<div><strong>{{ problem.title }}</strong> {{ problem.detail }}{% if problem.todo and problem.level == 'look' %} {{ problem.todo }}{% endif %}
+{% if problem.id and problem is not sameas broken %}<form method="post" action="/d/{{ token }}/mute/{{ problem.id }}"><button class="quiet">This is fine, stop telling me</button></form>{% endif %}</div></div>
+{% endfor %}
+</div>
+{% else %}
+<div class="nothing">{{ tick(22) }}Nothing has broken since {{ since }}.{% if checks %} Prodbat has loaded your site {{ "{:,}".format(checks) }} {{ 'time' if checks == 1 else 'times' }}.{% endif %}</div>
+{% endif %}
+</div>
+
+<div class="card list">
+<div class="list-head"><h2>What sells</h2><span class="muted">from Stripe</span></div>
+{% if not page.payments_connected %}
+<p class="empty">Payments show up here once your Stripe webhook forwards its events. Tell your coding agent: <span class="mono">Run `npx prodbat suggestions S-01` and follow it.</span></p>
+{% else %}
+<div class="rows">
+{% for row in page.sells %}<div class="row"><span>{{ row.name }}</span><b><span class="muted">{{ row.count }} {{ 'payment' if row.count == 1 else 'payments' }}</span>&nbsp;&nbsp;{{ row.amount }}</b></div>
+{% else %}<p class="empty">No payments this week.</p>
+{% endfor %}
+</div>
+<p class="empty">{{ page.last_payment }}</p>
+{% if page.buyers %}
+<div class="list-head"><h2>Where buyers came from</h2><span class="muted">this week</span></div>
+<div class="rows">
+{% for row in page.buyers %}<div class="row"><span>{{ row.name }}</span><b><span class="muted">{{ row.count }} {{ 'payment' if row.count == 1 else 'payments' }}</span>&nbsp;&nbsp;{{ row.amount }}</b></div>
+{% endfor %}
+</div>
+{% endif %}
+{% endif %}
+</div>
+
+<div class="card list">
+<div class="list-head"><h2>Pages</h2><span class="muted">visitors</span></div>
+<div class="rows">
+{% for row in page.pages %}<div class="row"><span class="mono">{{ row.name }}</span><b>{{ "{:,}".format(row.count) }}</b></div>
+{% else %}<p class="empty">No page views this week.</p>
+{% endfor %}
+</div>
+</div>
+
+<div class="card list">
+<div class="list-head"><h2>Where they came from</h2><span class="muted">visitors</span></div>
+<div class="rows">
+{% for row in page.sources %}<div class="row"><span>{{ row.name }}{% if row.tag %} <span class="muted">{{ row.tag }}</span>{% endif %}</span><b>{{ "{:,}".format(row.count) }}</b></div>
+{% else %}<p class="empty">No visitors this week.</p>
+{% endfor %}
+</div>
+</div>
+</section>
+
+{% if page.work %}
+<section class="card list">
+<div class="list-head"><h2>Background jobs</h2></div>
+<div class="rows">
+{% for name, state in page.work %}<div class="row"><span>{{ name }}</span><span class="muted">{{ state }}</span></div>
+{% endfor %}
+</div>
+</section>
+{% endif %}
+
+{% if page.happened or page.coming_up or page.suggestion %}
+<section class="lists">
+{% if page.happened %}
+<div class="plain">
+<h2>What happened</h2>
+<div class="rows">
+{% for date, sentence in page.happened %}<div class="event"><span class="muted">{{ date }}</span><span>{{ sentence }}</span></div>
+{% endfor %}
+</div>
+</div>
+{% endif %}
+{% if page.coming_up or page.suggestion %}
+<div class="plain">
+<h2>Coming up</h2>
+<div class="rows">
+{% for item in page.coming_up %}<div class="item">{{ item }}</div>
+{% endfor %}
+{% if page.suggestion %}<div class="item"><span>{{ page.suggestion.pitch }} To add it, tell your coding agent:</span>
+<pre id="suggestion">Run `npx prodbat suggestions {{ page.suggestion.id }}` and follow it.</pre>
+<div class="actions">{{ copy_button('suggestion', 'Copy') }}</div></div>{% endif %}
+</div>
+</div>
+{% endif %}
+</section>
+{% endif %}
+{% endif %}
+
+{% if texts %}
+<section class="card list" id="texts">
+<h2>Text messages</h2>
+{% if sms_to %}
+<p>Texts go to <strong>{{ sms_to }}</strong> when customers are affected ("Broken:"), and when it's working again. Nothing else is texted.</p>
+<form method="post" action="/d/{{ token }}/sms/remove"><button class="quiet">Stop texting me</button></form>
+{% elif sms_pending %}
+<p>We texted a code to {{ sms_pending }}.</p>
+<form method="post" action="/d/{{ token }}/sms/confirm" class="actions">
+<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="6-digit code" aria-label="Code">
+<button class="primary">Turn texts on</button>
+</form>
+{% else %}
+<p class="muted">Get a text when customers are affected: checkout or sign-in failing, or the site down. Only "Broken:" alerts are texted.</p>
+<form method="post" action="/d/{{ token }}/sms" class="actions">
+<input name="number" type="tel" autocomplete="tel" required placeholder="+1 555 123 4567" aria-label="Phone number with country code">
+<button>Text me a code</button>
+</form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if slack %}
+<section class="card list" id="slack">
+<h2>Slack</h2>
+{% if slack_error %}
+<p><strong>{{ slack_error }}</strong> Alerts still go by email.</p>
+<form method="post" action="/d/{{ token }}/slack" class="actions"><button class="primary">Connect Slack again</button></form>
+{% elif slack_connected %}
+<p>Alerts also go to <strong>{{ slack_channel }}</strong>{% if slack_team %} in {{ slack_team }}{% endif %}. Each problem is one message, and "Working again" replies in its thread.</p>
+<form method="post" action="/d/{{ token }}/slack/remove"><button class="quiet">Disconnect Slack</button></form>
+{% else %}
+<p class="muted">Post alerts to a Slack channel as well as by email. You pick the channel; we only post alerts there.</p>
+<form method="post" action="/d/{{ token }}/slack" class="actions"><button>Add to Slack</button></form>
+{% endif %}
+</section>
+{% endif %}
+
+<footer>
+<span class="muted">{% if page.has_logs %}<a href="/d/{{ token }}/logs">Logs</a> · {% endif %}This page has no settings.{% if alert_email %} Alerts go to {{ alert_email }}.{% else %} No email address is set, so alerts have nowhere to go.{% endif %}</span>
+<span class="actions">
+<form method="post" action="/d/{{ token }}/key" onsubmit="return confirm('Replace the secret key? The old one stops working at once, and your host will need the new one.')"><button class="quiet">New secret key</button></form>
+{% if can_test %}<form method="post" action="/d/{{ token }}/test-alert" id="test-alert"><button>Send me a test alert</button></form>{% endif %}
+</span>
+</footer>
+</main>
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-copy]');
+  if (b) {
+    navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent).then(function () {
+      var was = b.textContent; b.textContent = 'Copied'; setTimeout(function () { b.textContent = was; }, 1500);
+    });
+  }
+  var d = e.target.closest('[data-dismiss]');
+  if (d) {
+    var card = d.closest('[data-finish]');
+    card.hidden = true;
+    try { localStorage.setItem('pb-finish-' + card.dataset.finish, '1'); } catch (_) {}
+  }
+});
+var finish = document.querySelector('[data-finish]');
+try { if (finish && localStorage.getItem('pb-finish-' + finish.dataset.finish)) finish.hidden = true; } catch (_) {}
+{% if needs_timezone %}// Tell Prodbat this browser's time zone once, so emails use local times.
+try {
+  var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (tz) fetch('/d/{{ token }}/timezone', { method: 'POST', body: new URLSearchParams({ tz: tz }) });
+} catch (_) {}
+{% endif %}// While waiting for the first visit, look again every 10 seconds.
+if (document.querySelector('[data-waiting]')) setTimeout(function () { location.reload(); }, 10000);
+</script>
+</body>
+</html>

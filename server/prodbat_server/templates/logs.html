@@ -1,0 +1,26 @@
+{% extends "explore.html" %}
+{% block head %}{% if live %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block title %}Logs{% endblock %}
+{% block main %}
+<div class="bar">
+<h1>Logs <span class="muted">kept for {{ keep }} days</span></h1>
+{% set qs = 'q=' ~ (q | urlencode) ~ '&level=' ~ level ~ '&' %}{% include "_ranges.html" %}
+</div>
+<section class="card">{{ chart }}</section>
+<form class="filters" method="get">
+<input type="hidden" name="range" value="{{ range }}">
+<label>Containing<input name="q" value="{{ q }}" placeholder="a word or phrase"></label>
+<label>At least<select name="level"><option value="">any level</option>{% for name in levels %}<option value="{{ name }}"{% if name == level %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+<label>Live<select name="live"><option value="">off</option><option value="1"{% if live %} selected{% endif %}>every 5 seconds</option></select></label>
+<button>Show</button>
+</form>
+{% if lines %}
+<div class="lines">
+{% for line in lines %}<div class="line lv-{{ line.level }}"><span class="ts">{{ line.ts.strftime('%d %b %H:%M:%S') }}</span> {{ line.level.upper() }} {{ line.message }}{% if line.fields %} <span class="ts">{{ line.fields | tojson }}</span>{% endif %}</div>
+{% endfor %}
+</div>
+{% if older %}<div><a href="?range={{ range }}&q={{ q | urlencode }}&level={{ level }}&before={{ older | urlencode }}">Older lines</a></div>{% endif %}
+{% else %}
+<p class="empty">No log lines{% if q %} containing “{{ q }}”{% endif %} in the last {{ range }}. Your app sends them with the Prodbat library: <span class="mono">npx prodbat suggestions S-07</span>.</p>
+{% endif %}
+{% endblock %}

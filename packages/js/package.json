@@ -1,0 +1,37 @@
+{
+  "name": "prodbat",
+  "version": "0.0.1",
+  "description": "Prodbat: the command line (npx prodbat) and the library for servers and edge functions (errors, logs, job queues, Stripe events). Node, Bun, Deno, Supabase Edge Functions, Cloudflare Workers.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "prodbat": "bin/prodbat.mjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md"
+  ],
+  "homepage": "https://prodbat.com",
+  "keywords": ["monitoring", "error-tracking", "uptime", "logs", "cli", "claude-code", "supabase", "cloudflare-workers"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prodbat/prodbat.git",
+    "directory": "packages/js"
+  },
+  "main": "lib/index.cjs",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.mjs",
+      "require": "./lib/index.cjs"
+    }
+  }
+}

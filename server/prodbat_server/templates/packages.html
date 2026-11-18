@@ -1,0 +1,22 @@
+{% extends "explore.html" %}
+{% block title %}Packages{% endblock %}
+{% block main %}
+<div class="bar">
+<h1>Packages <span class="muted">{{ with_problems }} of {{ total }} need attention</span></h1>
+<span class="ranges"><a href="?show=problems"{% if show == 'problems' %} aria-current="true"{% endif %}>Need attention</a><a href="?show=all"{% if show != 'problems' %} aria-current="true"{% endif %}>All</a></span>
+</div>
+<section class="card scroll">
+{% if packages %}
+<table>
+<thead><tr><th>Package</th><th>Ecosystem</th><th>Version</th><th>Newest</th><th>Problems</th></tr></thead>
+<tbody>{% for p in packages %}<tr>
+<td class="mono">{{ p.name }}{% if not p.direct %} <span class="tag">indirect</span>{% endif %}</td>
+<td>{{ p.ecosystem }}</td>
+<td class="mono">{{ p.version }}</td>
+<td class="mono">{% if p.behind %}{{ p.latest }}{% else %}<span class="muted">{{ p.latest or '–' }}</span>{% endif %}</td>
+<td class="clip">{% for problem in p.problems %}<div>{{ problem }}</div>{% else %}<span class="muted">None known</span>{% endfor %}</td>
+</tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="empty">{% if total %}No known problems in {{ total }} packages.{% else %}No packages reported yet: <span class="mono">npx prodbat deps</span>.{% endif %}</p>{% endif %}
+</section>
+{% endblock %}

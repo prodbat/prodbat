@@ -1,0 +1,39 @@
+# Packagist only reads a composer.json at the root of a repository, so the PHP
+# package is mirrored from packages/php into its own repository,
+# prodbat/prodbat-php, which is the one submitted to Packagist.
+#
+# Runs in the public repository only. It needs a secret, PHP_SPLIT_TOKEN: a
+# fine-grained GitHub token with "Contents: read and write" on prodbat-php.
+#
+# Releasing a PHP version: push a tag here named php-v1.2.3; it arrives in
+# prodbat-php as v1.2.3, and Packagist picks it up.
+name: Mirror the PHP package
+
+on:
+  push:
+    branches: [main]
+    paths: ["packages/php/**"]
+    tags: ["php-v*"]
+  workflow_dispatch:
+
+jobs:
+  split:
+    if: github.repository == 'prodbat/prodbat'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Split packages/php and push it
+        env:
+          TOKEN: ${{ secrets.PHP_SPLIT_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha=$(git subtree split --prefix=packages/php HEAD)
+          remote="https://x-access-token:${TOKEN}@github.com/prodbat/prodbat-php.git"
+          git push "$remote" "${sha}:refs/heads/main" --force
+          if [[ "$GITHUB_REF" == refs/tags/php-v* ]]; then
+            version="${GITHUB_REF#refs/tags/php-}"
+            git push "$remote" "${sha}:refs/tags/${version}"
+          fi

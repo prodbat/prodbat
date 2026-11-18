@@ -1,0 +1,34 @@
+{% extends "explore.html" %}
+{% block title %}Errors{% endblock %}
+{% block main %}
+<div class="bar">
+<h1>Errors <span class="muted">{{ total }} {{ 'issue' if total == 1 else 'issues' }} in the last {{ range }}</span></h1>
+{% set qs = 'source=' ~ source ~ '&q=' ~ (q | urlencode) ~ '&sort=' ~ sort ~ '&' %}{% include "_ranges.html" %}
+</div>
+<section class="card">{{ chart }}</section>
+<form class="filters" method="get">
+<input type="hidden" name="range" value="{{ range }}">
+<label>Search<input name="q" value="{{ q }}" placeholder="message or route"></label>
+<label>Where<select name="source"><option value="all">Everywhere</option>{% for key, label in sources.items() %}<option value="{{ key }}"{% if key == source %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Sort<select name="sort"><option value="last"{% if sort == 'last' %} selected{% endif %}>Last seen</option><option value="count"{% if sort == 'count' %} selected{% endif %}>Most events</option></select></label>
+<button>Apply</button>
+</form>
+<section class="card scroll">
+{% if issues %}
+<table>
+<thead><tr><th>Issue</th><th>Where</th><th class="num">Events</th><th class="num">Visitors</th><th>Trend</th><th>Last seen</th><th>First seen</th></tr></thead>
+<tbody>
+{% for i in issues %}<tr>
+<td class="clip"><a href="/d/{{ token }}/errors/{{ i.source }}/{{ i.key }}?range={{ range }}"><strong>{{ i.title | truncate(140) }}</strong></a><br><span class="tag">{{ sources[i.source] }}</span></td>
+<td class="mono clip">{{ i.where or '' }}</td>
+<td class="num">{{ "{:,}".format(i.count) }}</td>
+<td class="num">{{ "{:,}".format(i.users) if i.users is not none else '–' }}</td>
+<td>{{ i.spark }}</td>
+<td class="muted">{{ i.last_ago }}</td>
+<td class="muted">{{ i.first_ago }}</td>
+</tr>{% endfor %}
+</tbody>
+</table>
+{% else %}<p class="empty">No errors in the last {{ range }}{% if q %} matching “{{ q }}”{% endif %}.</p>{% endif %}
+</section>
+{% endblock %}

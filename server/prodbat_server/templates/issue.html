@@ -1,0 +1,39 @@
+{% extends "explore.html" %}
+{% block title %}{{ detail.title | truncate(60) }}{% endblock %}
+{% block main %}
+<div><a href="/d/{{ token }}/errors?range={{ range }}" class="muted">← All errors</a></div>
+<div class="bar">
+<h1 class="clip">{{ detail.title }}</h1>
+{% set qs = '' %}{% include "_ranges.html" %}
+</div>
+<section class="card stats">
+<div><span class="muted">Where</span><b class="mono" style="font-size:14px">{{ detail.where or detail.route }}</b></div>
+<div><span class="muted">Seen</span><b>{{ "{:,}".format(total) }}</b><span class="muted">in the last {{ range }}</span></div>
+<div><span class="muted">Last seen</span><b>{{ last_ago }}</b></div>
+<div><span class="muted">First seen (of the last 50)</span><b>{{ first_ago }}</b></div>
+<div><span class="muted">Kind</span><b style="font-size:15px">{{ source_label }}</b></div>
+</section>
+<section class="card">{{ chart }}</section>
+<section class="card">
+<h2>For your coding agent</h2>
+<pre id="agent">{{ prompt }}</pre>
+<div><button type="button" data-copy="agent">Copy</button></div>
+</section>
+{% if detail.trace %}
+<section class="card"><h2>Stack trace (latest)</h2><pre>{{ detail.trace }}</pre></section>
+{% endif %}
+<div class="grid">
+<section class="card scroll">
+<h2>Latest events</h2>
+<table>
+<thead><tr><th>When</th><th>{{ 'Route' if source == 'server' else 'Page' }}</th><th>{{ 'Status' if source == 'server' else 'Visitor' }}</th></tr></thead>
+<tbody>{% for e in events %}<tr><td class="mono">{{ e.ts.strftime('%d %b %H:%M:%S') }}</td><td class="mono clip">{{ e.at }}</td><td class="mono">{{ e.who }}</td></tr>{% endfor %}</tbody>
+</table>
+</section>
+<section class="card">
+<h2>Logged around the last one</h2>
+{% if logs %}<div class="lines">{% for line in logs %}<div class="line lv-{{ line.level }}"><span class="ts">{{ line.ts.strftime('%H:%M:%S') }}</span> {{ line.level.upper() }} {{ line.message }}</div>{% endfor %}</div>
+{% else %}<p class="empty">Nothing was logged in the two minutes before it.</p>{% endif %}
+</section>
+</div>
+{% endblock %}
