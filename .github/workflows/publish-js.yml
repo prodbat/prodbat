@@ -1,0 +1,47 @@
+# Publishes packages/js to npm through trusted publishing (no token): npm
+# trusts this workflow in prodbat/prodbat, set up on the package's settings page.
+#
+# Releasing: set the version in packages/js/package.json, then push a tag
+# named js-v1.2.3 to match.
+name: Publish the JS package
+
+on:
+  push:
+    tags: ["js-v*"]
+
+jobs:
+  publish:
+    if: github.repository == 'prodbat/prodbat'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: packages/js
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@latest
+
+      - name: Check the tag matches the version
+        run: |
+          tag="${GITHUB_REF_NAME#js-v}"
+          version=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match version $version in package.json" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: npm test
+
+      - name: Publish
+        run: npm publish --provenance --access public
