@@ -86,10 +86,10 @@ async def call(request: Request, name: str, args: dict) -> str:
             return (await api.suggestions(db, project, state.settings, str(args.get("id", ""))))["text"]
         if name == "prodbat_test_alert":
             state.limiter.check("test-alert", str(project.id), 5, 3600)
-            queued = api.queue_test_alert(db, project, state.settings)
+            queued = await api.queue_test_alert(db, project, state.settings)
             await db.commit()
-            return (f"A test alert is on its way to {api.test_destinations(project, state.settings)}." if queued
-                    else api.NOWHERE)
+            return (f"A test alert is on its way to {await api.test_destinations(db, project, state.settings)}."
+                    if queued else api.NOWHERE)
     raise KeyError(name)
 
 

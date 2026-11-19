@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import Settings
 from .models import Email, Incident, Mute, Project
-from . import slack
+from . import push, slack, telegram
 from .texts import queue_text
 from .words import clock, lasted
 
@@ -70,6 +70,9 @@ def queue_alert(db: AsyncSession, project: Project, incident: Incident, settings
     incident.message_id = incident.message_id or message_id
     slack.post_alert(db, project, incident, settings, PREFIX[incident.level], incident.todo or DEFAULT_TODO,
                      agent_prompt(project, incident), clock(incident.started_at, project.timezone))
+    telegram.post_alert(db, project, incident, settings, PREFIX[incident.level], incident.todo or DEFAULT_TODO,
+                        agent_prompt(project, incident), clock(incident.started_at, project.timezone))
+    push.post_alert(db, project, incident, settings, PREFIX[incident.level])
     if incident.level == "broken":  # texts only when customers are affected now
         queue_text(db, project, settings, f"Prodbat. {subject}. Since {clock(incident.started_at, project.timezone)}. "
                                           f"{settings.base}/d/{project.page_token}")
@@ -127,6 +130,8 @@ def digest(db: AsyncSession, project: Project, new: list[Incident], settings: Se
         queue_email(db, project, settings,
                     f"Needs a look: {len(new)} things about {about} on {project.domain}", "\n".join(lines))
         slack.post_digest(db, project, settings, new, about)
+        telegram.post_digest(db, project, settings, new, about)
+        push.post_digest(db, project, settings, new, about)
 
 
 def resolve(db: AsyncSession, project: Project, incident: Incident, settings: Settings, now: dt.datetime,
@@ -143,3 +148,5 @@ def resolve(db: AsyncSession, project: Project, incident: Incident, settings: Se
         queue_text(db, project, settings, f"Prodbat. Working again: {incident.title} on {project.domain}, "
                                           f"after {duration}.")
         slack.post_recovery(db, project, incident, settings, recovery, duration)
+        telegram.post_recovery(db, project, incident, settings, recovery, duration)
+        push.post_recovery(db, project, incident, settings, recovery, duration)

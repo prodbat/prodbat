@@ -120,6 +120,19 @@ class Project(Base):
     slack_state: Mapped[str | None] = mapped_column(Text)
     # Why Slack stopped taking messages (the channel was archived, the app was removed).
     slack_error: Mapped[str | None] = mapped_column(Text)
+    # Notifications on the owner's devices through web push (see PushSubscription).
+    # A hosted plan can switch them off. The error says why a device was dropped.
+    push_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    push_error: Mapped[str | None] = mapped_column(Text)
+    # Alerts in a Telegram chat or group. The code is what the owner's "Start" link
+    # carries to the bot, good for an hour. A hosted plan can switch it off.
+    telegram_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    telegram_chat: Mapped[str | None] = mapped_column(Text)  # "Ann Lee" or the group's title
+    telegram_code: Mapped[str | None] = mapped_column(Text, unique=True)
+    telegram_code_at: Mapped[dt.datetime | None] = timestamp()
+    # Why Telegram stopped taking messages (the bot was blocked or removed from the group).
+    telegram_error: Mapped[str | None] = mapped_column(Text)
 
 
 class DailySalt(Base):
@@ -267,6 +280,8 @@ class Incident(Base):
     message_id: Mapped[str | None] = mapped_column(Text)
     # The first Slack message's timestamp, so later ones reply in its thread.
     slack_ts: Mapped[str | None] = mapped_column(Text)
+    # The first Telegram message's id, so later ones reply to it.
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class Mute(Base):
@@ -344,6 +359,62 @@ class SlackPost(Base):
     incident: Mapped["Incident | None"] = relationship()
     text: Mapped[str] = mapped_column(Text)  # what notifications show
     blocks: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    sent_at: Mapped[dt.datetime | None] = timestamp()
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class TelegramMessage(Base):
+    """Outbox for Telegram messages, sent by the worker like emails. One about a
+    problem is sent first, and later ones about it reply to that one."""
+
+    __tablename__ = "telegram_messages"
+    __table_args__ = (Index("ix_telegram_messages_unsent", "created_at", postgresql_where=text("sent_at is null")),)
+
+    id: Mapped[int] = pk()
+    project_id: Mapped[uuid.UUID] = project_fk()
+    incident_id: Mapped[int | None] = mapped_column(ForeignKey("incidents.id", ondelete="SET NULL"))
+    incident: Mapped["Incident | None"] = relationship()
+    text: Mapped[str] = mapped_column(Text)  # Telegram's HTML, already escaped
+    created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    sent_at: Mapped[dt.datetime | None] = timestamp()
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class PushSubscription(Base):
+    """One browser or phone that shows the project's alerts as notifications.
+    The endpoint is the push service's address for it; the keys encrypt what
+    is sent, so the push service can't read it."""
+
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = pk()
+    project_id: Mapped[uuid.UUID] = project_fk()
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(Text)
+    auth: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)  # "Chrome on Android"
+    created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    last_used_at: Mapped[dt.datetime | None] = timestamp()
+
+
+class PushMessage(Base):
+    """Outbox for notifications, sent by the worker to every device of the
+    project, or to one device when subscription_id is set."""
+
+    __tablename__ = "push_messages"
+    __table_args__ = (Index("ix_push_messages_unsent", "created_at", postgresql_where=text("sent_at is null")),)
+
+    id: Mapped[int] = pk()
+    project_id: Mapped[uuid.UUID] = project_fk()
+    incident_id: Mapped[int | None] = mapped_column(ForeignKey("incidents.id", ondelete="SET NULL"))
+    incident: Mapped["Incident | None"] = relationship()
+    subscription_id: Mapped[int | None] = mapped_column(ForeignKey("push_subscriptions.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    urgent: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
     sent_at: Mapped[dt.datetime | None] = timestamp()
     attempts: Mapped[int] = mapped_column(default=0)

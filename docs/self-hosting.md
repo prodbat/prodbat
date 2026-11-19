@@ -45,6 +45,8 @@ All settings are environment variables. `.env.example` lists them with what each
 | `PRODBAT_TWILIO_ACCOUNT_SID`, `_AUTH_TOKEN`, `_FROM` | Text messages when customers are affected; without them, texts aren't offered |
 | `PRODBAT_TEXT_COUNTRIES` | Optional: country codes texts may go to, such as `+1`. Empty allows any country |
 | `PRODBAT_SLACK_CLIENT_ID`, `_CLIENT_SECRET` | Alerts in Slack; without them, Slack isn't offered. See below |
+| `PRODBAT_VAPID_PUBLIC_KEY`, `_PRIVATE_KEY`, `_SUBJECT` | Notifications on phones and computers (web push); without them, they aren't offered. See below |
+| `PRODBAT_TELEGRAM_BOT_TOKEN`, `_BOT_NAME`, `_WEBHOOK_SECRET` | Alerts in Telegram; without them, Telegram isn't offered. See below |
 | `PRODBAT_WATCHER_URL` | A URL requested once a minute, so something outside can notice if this server stops |
 
 ### Slack
@@ -71,6 +73,34 @@ settings:
 ```
 
 Then Basic Information → App Credentials: put the Client ID in `PRODBAT_SLACK_CLIENT_ID` and the Client Secret in `PRODBAT_SLACK_CLIENT_SECRET`, and restart. The app stays private to your workspace, which is all a self-hosted server needs. Slack's access token is stored in the `projects` table, so treat database backups as secret.
+
+### Phone notifications
+
+The page can show alerts as notifications on the owner's phone or computer, through the push service each browser already uses (Google's for Chrome and Android, Mozilla's for Firefox, Apple's for Safari, Microsoft's for Edge). No app or account is needed. Make a key pair once:
+
+```sh
+uv run python -m prodbat_server vapid-keys
+```
+
+Put the two keys in `PRODBAT_VAPID_PUBLIC_KEY` and `PRODBAT_VAPID_PRIVATE_KEY`, and set `PRODBAT_VAPID_SUBJECT` to an address push services can contact you at (`mailto:you@example.com` or an `https://` page), then restart the server and the worker. Keep the private key secret. If you change the pair, every device has to press "Notify me on this device" again.
+
+Browsers only allow notifications on pages served over HTTPS (or `http://localhost`). On an iPhone or iPad (iOS 16.4 or later) the page has to be added to the Home Screen first: open the page in Safari, tap Share, then Add to Home Screen, open it from there and press the button. Notifications carry only the alert's headline and one sentence, encrypted so the push service can't read them.
+
+### Telegram
+
+To let your project pages offer "Connect Telegram", make a bot once. In Telegram, open a chat with [@BotFather](https://t.me/BotFather), send `/newbot`, and pick a name and a username ending in `bot`. BotFather answers with a token.
+
+- `PRODBAT_TELEGRAM_BOT_TOKEN`: the token, like `123456789:AA...`
+- `PRODBAT_TELEGRAM_BOT_NAME`: the bot's username without the @, like `YourProdbatBot`
+- `PRODBAT_TELEGRAM_WEBHOOK_SECRET`: any long random string of letters, digits, `-` and `_` (for example from `openssl rand -hex 32`). Telegram sends it with every update, and the server refuses updates without it
+
+Then tell Telegram where to send what people write to the bot:
+
+```sh
+uv run python -m prodbat_server telegram-webhook
+```
+
+The worker also does this when it starts and every six hours, so it heals itself after a change of address. Telegram only sends to an `https://` address, so `PRODBAT_PUBLIC_URL` has to be one. The bot only answers `/start` with a code from a project page; it ignores everything else. Each project stores the chat's id and name in the `projects` table.
 
 ## What you take on
 

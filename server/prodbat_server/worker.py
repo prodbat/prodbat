@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from .advisories import refresh_advisories
 from .app import load_extensions
 from .setup_emails import send_setup_emails
+from .push import send_pending_push
 from .slack import send_pending_slack
+from .telegram import register_webhook, send_pending_telegram
 from .texts import send_pending_texts
 from .checks import make_client, refresh_expiry, run_due_checks
 from .config import Settings
@@ -38,6 +40,8 @@ async def prune(sessions, settings: Settings) -> None:
         await db.execute(text("delete from emails where sent_at < :cutoff"), {"cutoff": cutoff})
         await db.execute(text("delete from texts where sent_at < :cutoff"), {"cutoff": cutoff})
         await db.execute(text("delete from slack_posts where sent_at < :cutoff"), {"cutoff": cutoff})
+        await db.execute(text("delete from push_messages where sent_at < :cutoff"), {"cutoff": cutoff})
+        await db.execute(text("delete from telegram_messages where sent_at < :cutoff"), {"cutoff": cutoff})
         await db.execute(text("delete from queue_reports where ts < now() - interval '7 days'"))
         # Log lines have their own, shorter life; a project can have its own number of days.
         await db.execute(text("""
@@ -80,6 +84,14 @@ async def worker(settings: Settings | None = None) -> None:
                 await send_pending(sessions, settings)
                 await send_pending_texts(sessions, settings, client)
                 await send_pending_slack(sessions, settings, client)
+                await send_pending_push(sessions, settings, client)
+                await send_pending_telegram(sessions, settings, client)
+                if settings.telegram_configured and due("telegram-webhook", 6 * 3600):
+                    # Where Telegram sends the bot's messages; repeating it is harmless.
+                    try:
+                        await register_webhook(client, settings)
+                    except Exception as exc:
+                        print(f"worker: Telegram webhook not set: {exc}", flush=True)
                 if settings.watcher_url and due("watcher", 60):
                     await client.get(settings.watcher_url)
             except Exception as exc:  # one bad pass must not stop the watch

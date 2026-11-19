@@ -6,6 +6,9 @@
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
 <title>{{ page.sentence }} {{ page.domain }}</title>
+<link rel="manifest" href="/d/{{ token }}/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<meta name="theme-color" content="#F4F5F1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
@@ -35,6 +38,8 @@ main.wrap { display: flex; flex-direction: column; gap: 40px; padding-top: 28px;
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 button { font: inherit; font-size: 16px; font-weight: 600; min-height: 48px; padding: 0 22px; border-radius: 10px; cursor: pointer; background: transparent; color: var(--ink); border: 1.5px solid var(--ink); }
 button.primary { background: var(--ink); color: #FFF; border-color: var(--ink); }
+a.button { display: inline-flex; align-items: center; font-weight: 600; min-height: 48px; padding: 0 22px; border-radius: 10px; border: 1.5px solid var(--ink); text-decoration: none; }
+a.button.primary { background: var(--ink); color: #FFF; }
 button.quiet { border: 0; padding: 0 8px; min-height: 44px; font-size: 14px; font-weight: 500; color: var(--muted); text-decoration: underline; }
 form { margin: 0; }
 .numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); overflow: hidden; }
@@ -273,6 +278,22 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 </section>
 {% endif %}
 
+{% if push %}
+<section class="card list" id="push">
+<h2>Phone notifications</h2>
+{% if push_error %}<p><strong>{{ push_error }}</strong></p>{% endif %}
+<p class="muted">Get a notification on your phone or computer when something breaks or needs a look, and when it's working again. It works in Chrome, Edge and Firefox, and on an iPhone or iPad once this page is on your Home Screen.</p>
+{% if devices %}
+<div class="rows">
+{% for device in devices %}<div class="row"><span>{{ device.label }} <span class="muted">added {{ device.created_at.day }} {{ device.created_at.strftime('%b') }}</span></span>
+<form method="post" action="/d/{{ token }}/push/{{ device.id }}/remove"><button class="quiet">Remove</button></form></div>
+{% endfor %}</div>
+{% endif %}
+<p class="muted" id="push-help" role="status" hidden></p>
+<div class="actions"><button type="button" id="push-on" data-key="{{ vapid_key }}">Notify me on this device</button></div>
+</section>
+{% endif %}
+
 {% if slack %}
 <section class="card list" id="slack">
 <h2>Slack</h2>
@@ -285,6 +306,28 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 {% else %}
 <p class="muted">Post alerts to a Slack channel as well as by email. You pick the channel; we only post alerts there.</p>
 <form method="post" action="/d/{{ token }}/slack" class="actions"><button>Add to Slack</button></form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if telegram %}
+<section class="card list" id="telegram">
+<h2>Telegram</h2>
+{% if telegram_links %}
+<p>Open Telegram and press Start. For a group instead, use the second link and pick the group. The links work for an hour.</p>
+<div class="actions" data-telegram-waiting>
+<a class="button primary" href="{{ telegram_links.chat }}" target="_blank" rel="noopener">Open Telegram</a>
+<a class="button" href="{{ telegram_links.group }}" target="_blank" rel="noopener">Add to a group</a>
+</div>
+{% elif telegram_error %}
+<p><strong>{{ telegram_error }}</strong> Alerts still go by email.</p>
+<form method="post" action="/d/{{ token }}/telegram" class="actions"><button class="primary">Connect Telegram again</button></form>
+{% elif telegram_connected %}
+<p>Alerts also go to <strong>{{ telegram_chat }}</strong> in Telegram. Each problem is one message, and "Working again" replies to it.</p>
+<form method="post" action="/d/{{ token }}/telegram/remove"><button class="quiet">Disconnect Telegram</button></form>
+{% else %}
+<p class="muted">Get alerts in a Telegram chat or group as well as by email. Only alerts are sent there.</p>
+<form method="post" action="/d/{{ token }}/telegram" class="actions"><button>Connect Telegram</button></form>
 {% endif %}
 </section>
 {% endif %}
@@ -319,7 +362,50 @@ try {
   var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (tz) fetch('/d/{{ token }}/timezone', { method: 'POST', body: new URLSearchParams({ tz: tz }) });
 } catch (_) {}
-{% endif %}// While waiting for the first visit, look again every 10 seconds.
+{% endif %}{% if push %}// Notifications on this device: ask the browser, then hand its subscription to Prodbat.
+(function () {
+  var on = document.getElementById('push-on'), help = document.getElementById('push-help');
+  function say(text) { help.textContent = text; help.hidden = false; }
+  var denied = 'Notifications are blocked for this page. Allow them in your browser\'s settings for this site, then press the button again.';
+  var apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var installed = navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    on.hidden = true;
+    say(apple && !installed
+      ? 'On an iPhone or iPad, tap Share, then Add to Home Screen. Open Prodbat from your Home Screen, then tap Notify me on this device there.'
+      : 'This browser can\'t show notifications from websites. Chrome, Edge and Firefox can.');
+    return;
+  }
+  if (Notification.permission === 'denied') say(denied);
+  function key(text) {
+    var raw = atob((text + '===='.slice(text.length % 4 || 4)).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, function (c) { return c.charCodeAt(0); });
+  }
+  on.addEventListener('click', function () {
+    on.disabled = true;
+    Notification.requestPermission().then(function (answer) {
+      if (answer !== 'granted') throw new Error(answer === 'denied' ? denied : 'Press the button again and choose Allow.');
+      return navigator.serviceWorker.register('/d/sw.js', { scope: '/d/{{ token }}' });
+    }).then(function () { return navigator.serviceWorker.ready; }).then(function (reg) {
+      return reg.pushManager.getSubscription().then(function (sub) {
+        return sub || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(on.dataset.key) });
+      });
+    }).then(function (sub) {
+      return fetch('/d/{{ token }}/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+    }).then(function (r) {
+      if (r.ok) { location.href = '/d/{{ token }}?sent=pushon#push'; return; }
+      return r.json().then(function (j) { throw new Error(j.detail || 'That didn\'t work. Try again.'); });
+    }).catch(function (e) {
+      on.disabled = false;
+      say(e && e.message && e.message.indexOf(' ') > 0 ? e.message : 'That didn\'t work. Try again.');
+    });
+  });
+})();
+{% endif %}// Back from Telegram: look again, so the page says it is connected.
+if (document.querySelector('[data-telegram-waiting]')) document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') location.reload();
+});
+// While waiting for the first visit, look again every 10 seconds.
 if (document.querySelector('[data-waiting]')) setTimeout(function () { location.reload(); }, 10000);
 </script>
 </body>

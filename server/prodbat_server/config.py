@@ -55,6 +55,30 @@ class Settings(BaseSettings):
     def slack_configured(self) -> bool:
         return bool(self.slack_client_id and self.slack_client_secret)
 
+    # Notifications on the owner's phone or computer through the browser's own
+    # push service (web push). Without these the page doesn't offer them. Make a
+    # pair with `python -m prodbat_server vapid-keys`; the subject is a mailto: or
+    # https: address push services can contact about this server.
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_subject: str | None = None
+
+    @property
+    def push_configured(self) -> bool:
+        return bool(self.vapid_public_key and self.vapid_private_key and self.vapid_subject)
+
+    # A Telegram bot, so owners can have alerts sent to a Telegram chat or group.
+    # From @BotFather: the token, and the bot's username without the @. The secret
+    # is any long random string; Telegram sends it back with every update. Without
+    # these the page doesn't offer Telegram. docs/self-hosting.md has the steps.
+    telegram_bot_token: str | None = None
+    telegram_bot_name: str | None = None
+    telegram_webhook_secret: str | None = None
+
+    @property
+    def telegram_configured(self) -> bool:
+        return bool(self.telegram_bot_token and self.telegram_bot_name and self.telegram_webhook_secret)
+
     # Where this process checks sites from, such as "oregon". Probes in other
     # regions (`python -m prodbat_server probe`) record checks under their own name.
     region: str = ""

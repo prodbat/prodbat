@@ -15,7 +15,7 @@ This repository is the open-source product. It is early: it runs and is tested l
 - **Background work**: scheduled jobs that stop running, and job queues (Celery, RQ, BullMQ, or any other over HTTP) that are stuck, silent or failing.
 - **Logs**: send log lines from your app, search them, and see what was logged around each problem.
 - **Email**: "Broken:" at once, "Needs a look:", "Working again:" in the same thread, and a short report every Monday.
-- **Slack and texts**: the same alerts in a Slack channel, one message per problem with "Working again" in its thread; a text message when customers are affected.
+- **Slack, Telegram, phone and texts**: the same alerts in a Slack channel or a Telegram chat, one message per problem with "Working again" replying to it; as notifications on your phone or computer, with no app to install (on an iPhone, add the page to the Home Screen first); a text message when customers are affected.
 - **For coding agents**: a command line (`npx prodbat`), an MCP endpoint, a skill, and `llms.txt`.
 
 ## Layout

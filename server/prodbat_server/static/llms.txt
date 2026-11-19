@@ -25,7 +25,7 @@
 - Scheduled jobs that stop, and job queues that are stuck, silent or failing (Celery, RQ, BullMQ, Sidekiq, Laravel, or one HTTP request a minute)
 - Log lines the app sends
 
-Alerts go by email, and to a Slack channel if the owner connects one on their page (when this server has a Slack app set up).
+Alerts go by email, and also to a Slack channel, a Telegram chat or the owner's phone (web push notifications) if the owner turns them on from their page and this server has them set up.
 
 ## API
 

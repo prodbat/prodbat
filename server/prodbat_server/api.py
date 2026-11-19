@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .checks import certificate_expiry, check_site, domain_expiry
 from . import security
 from .config import Settings
-from . import slack
+from . import push, slack, telegram
 from .flows import SAY, discover_pages
 from .incidents import queue_email
 from .models import (Attribution, Dependency, Job, LogLine, Payment, Pageview, Project, QueueReport, ServerError, hash_secret,
@@ -554,7 +554,7 @@ async def get_suggestion(request: Request, which: str) -> dict:
         return await suggestions(db, await project_for(request, db), request.app.state.settings, which)
 
 
-def queue_test_alert(db, project: Project, settings: Settings) -> bool:
+async def queue_test_alert(db, project: Project, settings: Settings) -> bool:
     body = "\n".join([
         "This is a test. Nothing is wrong.",
         "",
@@ -570,18 +570,24 @@ def queue_test_alert(db, project: Project, settings: Settings) -> bool:
     emailed = queue_email(db, project, settings,
                           f"Test: this is what a Prodbat alert for {project.domain} looks like", body) is not None
     posted = slack.post_test(db, project, settings)
-    return emailed or posted
+    chatted = telegram.post_test(db, project, settings)
+    pushed = bool(await push.devices(db, project, settings)) and push.post_test(db, project, settings)
+    return emailed or posted or chatted or pushed
 
 
-def test_destinations(project: Project, settings: Settings) -> str:
-    """"you@example.com and #alerts in Slack", for saying where a test alert went."""
+async def test_destinations(db, project: Project, settings: Settings) -> str:
+    """"you@example.com, #alerts in Slack and 2 devices", for saying where a test alert went."""
     places = [project.alert_email] if project.alert_email else []
     if slack.can_post(project, settings):
         places.append(f"{project.slack_channel} in Slack")
-    return " and ".join(places)
+    if telegram.can_post(project, settings):
+        places.append(f"{project.telegram_chat} in Telegram")
+    if devices := len(await push.devices(db, project, settings)):
+        places.append(plural(devices, "device"))
+    return " and ".join(places) if len(places) < 3 else ", ".join(places[:-1]) + " and " + places[-1]
 
 
-NOWHERE = "No email address or Slack channel is set for this project, so there is nowhere to send it."
+NOWHERE = "No email address, Slack channel, Telegram chat or device is set for this project, so there is nowhere to send it."
 
 
 @router.post("/test-alert")
@@ -589,11 +595,12 @@ async def post_test_alert(request: Request) -> dict:
     async with request.app.state.sessions() as db:
         project = await project_for(request, db)
         request.app.state.limiter.check("test-alert", str(project.id), 5, 3600)
-        queued = queue_test_alert(db, project, request.app.state.settings)
+        queued = await queue_test_alert(db, project, request.app.state.settings)
         await db.commit()
+        places = await test_destinations(db, project, request.app.state.settings)
     if not queued:
         raise HTTPException(400, NOWHERE)
-    return {"ok": True, "text": f"A test alert is on its way to {test_destinations(project, request.app.state.settings)}.\n"}
+    return {"ok": True, "text": f"A test alert is on its way to {places}.\n"}
 
 
 # ---- settings from prodbat.json -----------------------------------------

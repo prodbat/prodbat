@@ -5,6 +5,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from . import api, explore, ingest, mcp, page
@@ -42,6 +43,9 @@ def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None 
         module.setup(app)
     for module in (ingest, api, mcp, page, explore):
         app.include_router(module.router)
+
+    # Icons for notifications and for adding a page to a phone's Home Screen.
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/p.js")
     async def script() -> FileResponse:

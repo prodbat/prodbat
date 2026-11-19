@@ -13,6 +13,8 @@ uv run python -m prodbat_server run                  # migrate, serve on :8000 a
 uv run python -m prodbat_server add-site yourapp.com --email you@example.com
 ```
 
+For notifications on phones and computers, `uv run python -m prodbat_server vapid-keys` prints the keys to set. For Telegram, `uv run python -m prodbat_server telegram-webhook` points your bot at the server (the worker also does it).
+
 `add-site` prints the script tag, the private link to the page, and the secret key for the site's own server and the command line. Settings are `PRODBAT_*` environment variables; see `../.env.example` and `../docs/self-hosting.md`.
 
 ## Test it
@@ -42,6 +44,7 @@ Everything is in `prodbat_server/`.
 | `detect.py` | The rules that turn what was reported into problems. They are first guesses and are all at the top of the file |
 | `incidents.py` | Opens and closes problems and writes the emails |
 | `mailer.py` | Sends the outbox over SMTP |
+| `slack.py`, `telegram.py`, `texts.py`, `push.py` | Alerts in Slack, in Telegram, by text message, and as notifications on the owner's devices (web push; `static/sw.js` shows them) |
 | `weekly.py` | The Monday email |
 | `stripe_events.py` | Turns forwarded Stripe events into payments |
 | `flows.py` | Recognises routes that are part of paying, signing in and signing up |

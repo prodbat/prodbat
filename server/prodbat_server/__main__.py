@@ -2,6 +2,8 @@
 python -m prodbat_server add-site yourapp.com --email you@example.com
 python -m prodbat_server migrate | serve | worker    the same pieces, separately
 python -m prodbat_server probe                     checks from another region (PRODBAT_REGION)
+python -m prodbat_server vapid-keys                a key pair for phone notifications (web push)
+python -m prodbat_server telegram-webhook          tell Telegram where to send the bot's messages
 """
 
 import argparse
@@ -49,6 +51,23 @@ async def add_site(domain: str, email: str | None, new_key: bool) -> None:
         print(f"  {secret}\n")
 
 
+async def telegram_webhook() -> None:
+    import httpx
+
+    from .telegram import register_webhook
+
+    settings = Settings()
+    if not settings.telegram_configured:
+        raise SystemExit("Set PRODBAT_TELEGRAM_BOT_TOKEN, PRODBAT_TELEGRAM_BOT_NAME and "
+                         "PRODBAT_TELEGRAM_WEBHOOK_SECRET first.")
+    async with httpx.AsyncClient(timeout=20) as http:
+        try:
+            said = await register_webhook(http, settings)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from None
+    print(f"{said}. Telegram will send the bot's messages to {settings.base}/telegram/webhook.")
+
+
 def migrate() -> None:
     from pathlib import Path
 
@@ -85,6 +104,8 @@ def main(argv: list[str] | None = None) -> None:
     commands.add_parser("worker", help="outside checks, problem detection and email; run one alongside the server")
     commands.add_parser("migrate", help="create or update the database tables")
     commands.add_parser("probe", help="check sites from another region (set PRODBAT_REGION); never alerts")
+    commands.add_parser("vapid-keys", help="print a new key pair for phone notifications (web push)")
+    commands.add_parser("telegram-webhook", help="point the Telegram bot at this server (the worker also does this)")
     for name, text in (("serve", "the web server only"), ("run", "migrate, then the web server and the worker together")):
         sub = commands.add_parser(name, help=text)
         sub.add_argument("--host", default="0.0.0.0")
@@ -98,6 +119,17 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(worker())
     elif args.command == "migrate":
         migrate()
+    elif args.command == "vapid-keys":
+        from .push import new_vapid_keys
+
+        public, private = new_vapid_keys()
+        print("Set these where the server and the worker read their settings. Keep the private key secret;")
+        print("if you change the pair later, every device has to turn notifications on again.\n")
+        print(f"PRODBAT_VAPID_PUBLIC_KEY={public}")
+        print(f"PRODBAT_VAPID_PRIVATE_KEY={private}")
+        print("PRODBAT_VAPID_SUBJECT=mailto:you@example.com")
+    elif args.command == "telegram-webhook":
+        asyncio.run(telegram_webhook())
     elif args.command == "probe":
         from .probe import probe
 
