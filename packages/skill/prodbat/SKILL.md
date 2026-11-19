@@ -19,12 +19,18 @@ Prodbat watches one site: who visited and from where, what people paid for, erro
 
 ## Setting it up
 
+The usual setup is hosted Prodbat at prodbat.com. Do not set up a Prodbat server of your own unless the user asks for that.
+
 1. Ask the user which email address should hear about problems. Do not take it from git config.
-2. Run `npx prodbat init --email <address>`. It needs the Prodbat server address (`--server` or `PRODBAT_URL`) and that server's admin token (`--token` or `PRODBAT_ADMIN_TOKEN`); ask the user if you do not have them. If it cannot tell the production address it stops and says so: ask the user, then pass `--domain`.
-3. `init` prints one script tag and says which file it belongs in. Add it there so it is on every page. It also prints the few lines that make the server report its own errors; add those too.
-4. Add `PRODBAT_KEY` and `PRODBAT_URL` from `.env` to the environment variables where the app is hosted. Never commit `.env`.
-5. Deploy, then run `npx prodbat verify`.
-6. Give the user the page link that `init` printed. It is private: do not commit it or put it in a file.
+2. Run `npx prodbat init --email <address>`. If it cannot tell the production address it stops and says so: ask the user, then pass `--domain`.
+3. Tell the user what `init` says first: Prodbat has emailed that address a link, and they click Activate in it to see the dashboard and turn on alerts. If the email does not arrive, `init` prints a link they can open and sign in to instead.
+4. `init` prints one script tag and says which file it belongs in. Add it there so it is on every page. It also prints the few lines that make the server report its own errors; add those too.
+5. Add `PRODBAT_KEY` and `PRODBAT_URL` from `.env` to the environment variables where the app is hosted. Never commit `.env`.
+6. Deploy, then run `npx prodbat verify`. Until the user has clicked Activate, it reminds you; pass that on.
+
+`init` also writes `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), so the same things are MCP tools from the `prodbat` server. They need `PRODBAT_KEY` in the environment the agent was started from; MCP config does not read `.env`. The commands below work either way.
+
+On the user's own Prodbat server, pass `--server <url>` and `--token <admin token>` (or set `PRODBAT_URL` and `PRODBAT_ADMIN_TOKEN`) as well. Then there is no activation email; give the user the private page link `init` prints, and do not commit it or put it in a file.
 
 ## Without an account
 

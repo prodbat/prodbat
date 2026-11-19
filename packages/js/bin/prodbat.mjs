@@ -9,7 +9,8 @@ import path from 'node:path';
 const HELP = `prodbat: visitors, payments and what is broken, for one site.
 
   npx prodbat check <site>          a one-off look at any site from outside (no account)
-  npx prodbat init                  set this project up; prints a link for the user to claim it, and the script tag to add
+  npx prodbat init --email <addr>   set this project up on hosted Prodbat (prodbat.com). Ask the user for the address:
+                                    it gets the alerts and an email to activate the dashboard. Prints the script tag to add.
                                     (on a self-hosted server: --server <url> --token <admin token> --email <addr>)
   npx prodbat verify                after a deploy: does the site load, is data arriving
   npx prodbat next                  the most important thing to do for the live site, as one task with steps
@@ -28,6 +29,7 @@ prodbat.json can name routes that are part of paying or signing in, and pages to
   { "flows": { "pay": ["/api/buy"], "signin": ["/api/enter"] }, "pages": ["/login", "/pricing"] }
 The server address comes from --server, PRODBAT_URL, or prodbat.json.
 The project's secret key comes from PRODBAT_KEY in the environment or in .env.
+init also sets up Prodbat's MCP server for Claude Code (.mcp.json) and Cursor (.cursor/mcp.json).
 `;
 
 class Stop extends Error {
@@ -187,6 +189,7 @@ const AGENT_NOTE = `<!-- prodbat:start -->
 - After every deploy, run \`npx prodbat verify\`.
 - When asked what is wrong with the live site, run \`npx prodbat status\` first. \`npx prodbat logs\` shows what the app logged.
 - Routes that are part of paying or signing in alert on the first failure. If one is not recognised by its name, add it to \`flows\` in \`prodbat.json\`.
+- The same things are MCP tools (\`prodbat_next_task\`, \`prodbat_check_task\`, \`prodbat_status\`, \`prodbat_verify\` and more) from the \`prodbat\` server in \`.mcp.json\` and \`.cursor/mcp.json\`. That server needs PRODBAT_KEY in the environment the agent was started from; it does not read .env. If the tools are missing or say the key is not set, use the \`npx prodbat\` commands, which always work.
 <!-- prodbat:end -->
 `;
 
@@ -224,14 +227,15 @@ async function init(cwd, flags) {
     }
     domain = found[0];
   }
-  if (!flags.email && !claiming) {
-    throw new Stop('Ask the user which email address should hear about problems, then run again with --email. Do not take it from git config.', 2);
+  if (!flags.email) {
+    throw new Stop('Ask the user which email address should hear about problems' + (claiming ? ' (Prodbat also sends it the link to activate the dashboard)' : '')
+      + ', then run again with --email their@address. Do not take it from git config.', 2);
   }
 
   let made;
   if (claiming) {
     try {
-      made = await call(s, 'POST', '/api/start', { body: { domain, email: flags.email || null } });
+      made = await call(s, 'POST', '/api/start', { body: { domain, email: flags.email } });
     } catch (e) {
       if (/answered 404|Not Found/.test(e.message)) {
         throw new Stop(`${s.server} needs its admin token to create a project: pass --token or set PRODBAT_ADMIN_TOKEN.`, 2);
@@ -241,9 +245,14 @@ async function init(cwd, flags) {
   } else {
     made = await call(s, 'POST', '/api/projects', { auth: s.token, body: { domain, email: flags.email } });
   }
-  const claimLine = made.claim_url
-    ? `Tell the user now: open this link to claim ${made.domain} and get its alerts (takes 10 seconds):\n\n   ${made.claim_url}\n\nNothing is emailed to anyone until they have signed in. Carry on with the steps below meanwhile.\n\n`
-    : '';
+  let claimLine = '';
+  if (made.activation_sent_to) {
+    claimLine = `An activation email is on its way to ${made.activation_sent_to}. Tell the user now: open the email from Prodbat and click Activate to see the dashboard and get alerts. Carry on with the steps below meanwhile.\n`
+      + `If the email doesn't arrive within a few minutes, they can open ${made.claim_url} and sign in with that address.\n\n`;
+  } else if (made.claim_url) {
+    // A server that sends no activation email: the link is the only way in.
+    claimLine = `Tell the user now: open this link and sign in to claim ${made.domain} and get its alerts:\n\n   ${made.claim_url}\n\nCarry on with the steps below meanwhile.\n\n`;
+  }
   return writeProject(cwd, flags, s, made, claimLine);
 }
 
@@ -264,6 +273,8 @@ async function writeProject(cwd, flags, s, made, claimLine) {
   changed.push('prodbat.json');
   if (appendOnce(path.join(cwd, 'AGENTS.md'), 'prodbat:start', AGENT_NOTE)) changed.push('AGENTS.md');
   if (exists(path.join(cwd, 'CLAUDE.md')) && appendOnce(path.join(cwd, 'CLAUDE.md'), 'prodbat:start', AGENT_NOTE)) changed.push('CLAUDE.md');
+  const mcp = writeMcp(cwd, made.server);
+  changed.push(...mcp.written.map((file) => `${file} (the Prodbat MCP server)`));
 
   let deps = '';
   const packages = readPackages(cwd);
@@ -272,10 +283,18 @@ async function writeProject(cwd, flags, s, made, claimLine) {
     deps = `\nSent ${packages.length} package names and versions (no source code) for security alerts.`;
   }
 
-  const who = made.alerts_to ? `Problems will be emailed to ${made.alerts_to}.` : 'Problems will be emailed to whoever claims it.';
+  const who = made.alerts_to ? `Problems will be emailed to ${made.alerts_to}.`
+    : made.activation_sent_to ? `Problems will be emailed to ${made.activation_sent_to} once they activate it.`
+      : 'Problems will be emailed to whoever claims it.';
+  const mcpNote = 'MCP: the Prodbat tools (prodbat_next_task, prodbat_status, prodbat_verify and more) are set up for Claude Code in .mcp.json and for Cursor in .cursor/mcp.json.'
+    + " They read PRODBAT_KEY from the environment the agent was started from, not from .env. They work once the user runs `export $(grep '^PRODBAT_KEY=' .env)` in this folder and restarts the agent from that shell"
+    + " (Claude Code asks once before using a project's MCP server; for Cursor, open it with `cursor .` from that shell). Until then, the npx prodbat commands do the same things."
+    + (mcp.skipped.length ? `\nNot changed, because it is not valid JSON: ${mcp.skipped.join(', ')}. Add the prodbat server there by hand if it is wanted.` : '');
   const text = `${claimLine}Prodbat is set up for ${made.domain}. ${who}
 
 Changed: ${changed.join(', ')}.${deps}
+
+${mcpNote}
 
 Four things left, in this order:
 
@@ -293,11 +312,49 @@ Four things left, in this order:
 
 After that, \`npx prodbat next\` gives the next thing worth doing for the live site, one task at a time.
 
-${made.claim_url
-    ? `If the user has not opened it yet, remind them: ${made.claim_url}`
-    : `Tell the user: their page is ${made.page_url}\nThat link is private; anyone who has it can see the page. Do not commit it.`}
+${made.activation_sent_to
+    ? `If the user has not activated it yet, remind them to click Activate in the email sent to ${made.activation_sent_to}, or to open ${made.claim_url} and sign in.`
+    : made.claim_url
+      ? `If the user has not opened it yet, remind them: ${made.claim_url}`
+      : `Tell the user: their page is ${made.page_url}\nThat link is private; anyone who has it can see the page. Do not commit it.`}
 `;
   show(flags, { ...made, changed, text });
+}
+
+// ---- MCP ---------------------------------------------------------------------
+
+// Where each agent looks for a project's MCP servers, and how it names an
+// environment variable. Only the variable's name goes in the file, never the key.
+const MCP_FILES = [
+  ['.mcp.json', (server) => ({ type: 'http', url: `${server}/mcp`, headers: { Authorization: 'Bearer ${PRODBAT_KEY}' } })],
+  [path.join('.cursor', 'mcp.json'), (server) => ({ url: `${server}/mcp`, headers: { Authorization: 'Bearer ${env:PRODBAT_KEY}' } })],
+];
+
+// Adds the prodbat server to each file, keeping any other servers in it.
+// A file that is not valid JSON is left alone.
+export function writeMcp(cwd, server) {
+  const written = [], skipped = [];
+  for (const [file, entry] of MCP_FILES) {
+    const full = path.join(cwd, file);
+    const text = read(full);
+    let config = {};
+    if (text?.trim()) {
+      try { config = JSON.parse(text); } catch { config = null; }
+      const servers = config?.mcpServers;
+      if (!config || typeof config !== 'object' || Array.isArray(config)
+        || (servers !== undefined && (!servers || typeof servers !== 'object' || Array.isArray(servers)))) {
+        skipped.push(file);
+        continue;
+      }
+    }
+    const want = entry(server);
+    if (JSON.stringify(config.mcpServers?.prodbat) === JSON.stringify(want)) continue;
+    config.mcpServers = { ...(config.mcpServers || {}), prodbat: want };
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, JSON.stringify(config, null, 2) + '\n');
+    written.push(file);
+  }
+  return { written, skipped };
 }
 
 // ---- lockfiles -------------------------------------------------------------
@@ -412,7 +469,8 @@ export async function main(argv, cwd = process.cwd()) {
     const claim = await call(s, 'GET', '/api/start/status', { auth: s.key }).catch(() => null);
     if (claim && claim.claimed === false && claim.claim_url) {
       result.claim_url = claim.claim_url;
-      result.text = `Not claimed yet, so no alerts are sent. Ask the user to open this link and sign in:\n  ${claim.claim_url}\n\n${result.text}`;
+      const inbox = claim.activation_sent_to ? `click Activate in the email from Prodbat (sent to ${claim.activation_sent_to}), or ` : '';
+      result.text = `Not activated yet, so no alerts are sent. Ask the user to ${inbox}open this link and sign in:\n  ${claim.claim_url}\n\n${result.text}`;
     }
     show(flags, result);
     if (!result.ok) process.exitCode = 1;

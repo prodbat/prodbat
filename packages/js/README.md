@@ -7,10 +7,10 @@ Works on Node 18+, Bun, Deno, Supabase Edge Functions, Cloudflare Workers and Ve
 ## Set up
 
 ```sh
-npx prodbat init
+npx prodbat init --email you@example.com
 ```
 
-This creates the project, writes `PRODBAT_KEY` and `PRODBAT_URL` to `.env`, prints a link to claim it, and prints the script tag for your pages. To check any site from outside without an account: `npx prodbat check yoursite.com`.
+This creates the project on hosted Prodbat (prodbat.com), writes `PRODBAT_KEY` and `PRODBAT_URL` to `.env`, and prints the script tag for your pages. Prodbat emails that address a link to activate the dashboard; the alerts go there too. It also sets up Prodbat's MCP server for Claude Code (`.mcp.json`) and Cursor (`.cursor/mcp.json`), which read `PRODBAT_KEY` from the environment the agent was started from. On your own server, add `--server <url> --token <admin token>`. To check any site from outside without an account: `npx prodbat check yoursite.com`.
 
 ## The command line
 

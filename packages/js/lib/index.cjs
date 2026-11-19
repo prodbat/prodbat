@@ -19,7 +19,7 @@
 // dropped if Prodbat cannot be reached.
 'use strict';
 
-const VERSION = '0.0.1';
+const VERSION = '0.1.0';
 const config = { key: null, url: null };
 // Cloudflare Workers hand settings to the handler as `env`, not process.env.
 let handlerEnv = null;

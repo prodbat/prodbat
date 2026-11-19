@@ -5,7 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { findDomains, readPackages, serverStack, whereTheTagGoes } from '../bin/prodbat.mjs';
+import { findDomains, readPackages, serverStack, whereTheTagGoes, writeMcp } from '../bin/prodbat.mjs';
 
 const BIN = new URL('../bin/prodbat.mjs', import.meta.url).pathname;
 const seen = [];
@@ -28,14 +28,17 @@ before(async () => {
       }
       if (req.url === '/api/start') {
         return send(201, { domain: call.body.domain, server: base, site_key: 'pb_site', secret_key: 'pbs_secret', alerts_to: null,
-          page_url: `${base}/d/pagetoken`, claim_url: `${base}/claim/k7Q2`, script_tag: `<script defer src="${base}/p.js" data-site="pb_site"></script>` });
+          page_url: `${base}/d/pagetoken`, claim_url: `${base}/claim/k7Q2`, activation_sent_to: call.body.email,
+          script_tag: `<script defer src="${base}/p.js" data-site="pb_site"></script>` });
       }
       if (call.auth !== 'Bearer pbs_secret' && !req.url.startsWith('/api/check')) return send(401, { detail: 'That key does not belong to any project on this server.' });
       if (req.url === '/api/project') {
         return send(200, { domain: 'fromweb.com', server: base, site_key: 'pb_site', alerts_to: 'you@example.com', page_url: `${base}/d/pagetoken`,
           script_tag: `<script defer src="${base}/p.js" data-site="pb_site"></script>` });
       }
-      if (req.url === '/api/start/status') return send(200, { claimed, claim_url: claimed ? null : `${base}/claim/k7Q2` });
+      if (req.url === '/api/start/status') {
+        return send(200, { claimed, claim_url: claimed ? null : `${base}/claim/k7Q2`, activation_sent_to: claimed ? null : 'founder@example.com' });
+      }
       if (req.url === '/api/verify') return send(200, { ok: false, text: 'FAIL The script is on your pages.\n' });
       if (req.url === '/api/config') return send(200, { ok: true });
       if (req.url === '/api/tasks/next') return send(200, { text: '# Task T12: Fix POST /api/save\n' });
@@ -129,20 +132,57 @@ test('init sets the project up, writes its files and says where the tag goes', a
   assert.match(again.stderr, /already set up for yourapp\.com/);
 });
 
-test('without an admin token, init starts a project the user claims, and puts the link first', async () => {
+test('on hosted Prodbat, init needs the email address and asks the agent to get it from the user', async () => {
   const dir = project({ 'package.json': JSON.stringify({ homepage: 'https://claimme.com' }) });
+  const before = seen.length;
   const r = await run(dir, 'init', '--server', base);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /Ask the user which email address .*activate the dashboard.*--email.*Do not take it from git config/);
+  assert.ok(!seen.slice(before).some((c) => c.url === '/api/start'), 'nothing is started without an address');
+  assert.ok(!fs.existsSync(path.join(dir, 'prodbat.json')));
+});
+
+test('without an admin token, init starts the project and says an activation email is on its way', async () => {
+  const dir = project({ 'package.json': JSON.stringify({ homepage: 'https://claimme.com' }) });
+  const r = await run(dir, 'init', '--server', base, '--email', 'founder@example.com');
   assert.equal(r.code, 0, r.stderr);
-  assert.ok(r.stdout.startsWith('Tell the user now: open this link to claim claimme.com'), r.stdout.slice(0, 80));
-  assert.match(r.stdout, /Problems will be emailed to whoever claims it\./);
-  assert.match(r.stdout, /remind them: .*\/claim\/k7Q2\n$/);
-  assert.deepEqual(seen.find((c) => c.url === '/api/start').body, { domain: 'claimme.com', email: null });
+  assert.ok(r.stdout.startsWith('An activation email is on its way to founder@example.com. Tell the user now: open the email from Prodbat and click Activate'),
+    r.stdout.slice(0, 120));
+  assert.match(r.stdout, /If the email doesn't arrive within a few minutes, they can open .*\/claim\/k7Q2 and sign in with that address\./);
+  assert.match(r.stdout, /Problems will be emailed to founder@example\.com once they activate it\./);
+  assert.match(r.stdout, /remind them to click Activate in the email sent to founder@example\.com, or to open .*\/claim\/k7Q2 and sign in\.\n$/);
+  assert.doesNotMatch(r.stdout, /Nothing is emailed|pbs_secret/);
+  assert.match(r.stdout, /MCP: the Prodbat tools .* \.mcp\.json .* \.cursor\/mcp\.json\..*not from \.env/);
+  assert.deepEqual(seen.findLast((c) => c.url === '/api/start').body, { domain: 'claimme.com', email: 'founder@example.com' });
 
   claimed = false;
   const verify = await run(dir, 'verify');
-  assert.match(verify.stdout, /^Not claimed yet, so no alerts are sent\. .*\n {2}.*\/claim\/k7Q2/);
+  assert.match(verify.stdout, /^Not activated yet, so no alerts are sent\. Ask the user to click Activate in the email from Prodbat \(sent to founder@example\.com\), or open this link and sign in:\n {2}.*\/claim\/k7Q2/);
   claimed = true;
-  assert.doesNotMatch((await run(dir, 'verify')).stdout, /Not claimed/);
+  assert.doesNotMatch((await run(dir, 'verify')).stdout, /Not activated/);
+});
+
+test('init sets up the MCP server for Claude Code and Cursor, keeping their other servers and no key', async () => {
+  const dir = project({
+    'package.json': '{}',
+    '.mcp.json': JSON.stringify({ mcpServers: { other: { type: 'stdio', command: 'other-mcp' } } }),
+  });
+  const r = await run(dir, 'init', '--server', base, '--token', 'admin', '--email', 'you@example.com', '--domain', 'mcp.com');
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /Changed: .*\.mcp\.json \(the Prodbat MCP server\), \.cursor\/mcp\.json \(the Prodbat MCP server\)/);
+  const claude = JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8'));
+  assert.deepEqual(claude.mcpServers.other, { type: 'stdio', command: 'other-mcp' });
+  assert.deepEqual(claude.mcpServers.prodbat, { type: 'http', url: `${base}/mcp`, headers: { Authorization: 'Bearer ${PRODBAT_KEY}' } });
+  const cursor = JSON.parse(fs.readFileSync(path.join(dir, '.cursor', 'mcp.json'), 'utf8'));
+  assert.deepEqual(cursor.mcpServers.prodbat, { url: `${base}/mcp`, headers: { Authorization: 'Bearer ${env:PRODBAT_KEY}' } });
+  for (const file of ['.mcp.json', '.cursor/mcp.json']) assert.ok(!fs.readFileSync(path.join(dir, file), 'utf8').includes('pbs_'), `no key in ${file}`);
+  assert.match(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), /MCP tools .*PRODBAT_KEY in the environment the agent was started from/);
+
+  // Run again: nothing to change. A file that isn't JSON is left alone and said so.
+  assert.deepEqual(writeMcp(dir, base), { written: [], skipped: [] });
+  fs.writeFileSync(path.join(dir, '.mcp.json'), '{ not json');
+  assert.deepEqual(writeMcp(dir, 'https://other.example'), { written: ['.cursor/mcp.json'], skipped: ['.mcp.json'] });
+  assert.equal(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8'), '{ not json');
 });
 
 test('init --key sets up a project that was made on the website, without making another', async () => {

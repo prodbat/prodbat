@@ -302,6 +302,28 @@ def test_mcp_lists_six_tools_and_runs_them_with_the_projects_key(client, db, pro
     assert rpc(client, "resources/list")["error"]["code"] == -32601
 
 
+def test_mcp_speaks_what_claude_code_and_cursor_send_over_http(client, project, key):
+    # The version is the client's when this server speaks it, otherwise its own.
+    assert rpc(client, "initialize", {"protocolVersion": "2025-11-25"})["result"]["protocolVersion"] == "2025-11-25"
+    assert rpc(client, "initialize", {"protocolVersion": "2099-01-01"})["result"]["protocolVersion"] == "2025-06-18"
+    assert rpc(client, "ping") == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+    # Notifications and a client's answers get 202 and no body.
+    for message in ({"jsonrpc": "2.0", "method": "notifications/initialized"},
+                    {"jsonrpc": "2.0", "id": 7, "result": {}}):
+        r = client.post("/mcp", json=message)
+        assert r.status_code == 202 and r.content == b""
+    # No stream to listen to, and no session to end.
+    assert client.get("/mcp").status_code == 405
+    assert client.delete("/mcp").status_code == 405
+
+    # The agent's config named ${PRODBAT_KEY} but it wasn't set: say how to fix that.
+    for sent in ("Bearer ${PRODBAT_KEY}", "Bearer ${env:PRODBAT_KEY}", "Bearer "):
+        r = rpc(client, "tools/call", {"name": "prodbat_status"}, {"authorization": sent})["result"]
+        assert r["isError"] is True and "PRODBAT_KEY is not set in the environment" in r["content"][0]["text"]
+    assert "isError" not in rpc(client, "tools/call", {"name": "prodbat_status"}, key)["result"]
+
+
 # ---- the worker ---------------------------------------------------------
 
 def test_old_data_is_pruned_and_recent_data_is_kept(db, project):

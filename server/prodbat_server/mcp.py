@@ -2,8 +2,9 @@
 Prodbat about a site without the CLI.
 
 POST /mcp speaks JSON-RPC over plain HTTP responses (no streaming, no
-sessions). Every tool except prodbat_check needs the project's secret key
-as a Bearer token.
+sessions), which the Streamable HTTP transport allows. GET /mcp answers 405,
+which tells clients there is no stream to listen to. Every tool except
+prodbat_check needs the project's secret key as a Bearer token.
 """
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -12,7 +13,10 @@ from fastapi.responses import JSONResponse
 from . import api, tasks
 
 router = APIRouter()
-PROTOCOL = "2025-03-26"
+PROTOCOL = "2025-06-18"
+# Every version in which these messages (initialize, tools/list, tools/call,
+# ping) mean the same, answered as plain JSON over HTTP.
+PROTOCOLS = {"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"}
 NO_ARGS = {"type": "object", "properties": {}}
 
 ID_ARG = {"type": "object", "properties": {"id": {"type": "string", "description": "A task id, such as T12 or S-01"}},
@@ -93,6 +97,19 @@ async def call(request: Request, name: str, args: dict) -> str:
     raise KeyError(name)
 
 
+def unset_key(request: Request) -> bool:
+    """The agent's MCP config names ${PRODBAT_KEY}, but the variable wasn't
+    set where the agent started, so the placeholder arrived as it is."""
+    sent = request.headers.get("authorization", "")
+    return "${" in sent or sent.strip().lower() == "bearer"
+
+
+UNSET_KEY = ("PRODBAT_KEY is not set in the environment this agent was started from, so the Prodbat MCP server got "
+             "no key. MCP config does not read .env. Ask the user to run `export $(grep '^PRODBAT_KEY=' .env)` in "
+             "the project folder and restart the agent from that shell. Meanwhile the npx prodbat commands work: "
+             "they read .env.")
+
+
 @router.post("/mcp")
 async def mcp(request: Request) -> Response:
     try:
@@ -103,21 +120,27 @@ async def mcp(request: Request) -> Response:
         return JSONResponse({"jsonrpc": "2.0", "id": None,
                              "error": {"code": -32600, "message": "Send one request at a time."}})
     method, rid = message.get("method"), message.get("id")
-    if rid is None:  # a notification, such as notifications/initialized
+    if rid is None or method is None:
+        # A notification (such as notifications/initialized) or a client's
+        # answer to a request: accepted, with nothing to say back.
         return Response(status_code=202)
 
     def result(value: dict) -> JSONResponse:
         return JSONResponse({"jsonrpc": "2.0", "id": rid, "result": value})
 
     if method == "initialize":
-        return result({"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
-                       "serverInfo": {"name": "prodbat", "version": "0.0.1"}})
+        # Answer in the client's version when it is one this server speaks.
+        asked = (message.get("params") or {}).get("protocolVersion")
+        return result({"protocolVersion": asked if asked in PROTOCOLS else PROTOCOL, "capabilities": {"tools": {}},
+                       "serverInfo": {"name": "prodbat", "version": "0.1.0"}})
     if method == "ping":
         return result({})
     if method == "tools/list":
         return result({"tools": TOOLS})
     if method == "tools/call":
         params = message.get("params") or {}
+        if params.get("name") != "prodbat_check" and unset_key(request):
+            return result({"content": [{"type": "text", "text": UNSET_KEY}], "isError": True})
         try:
             text = await call(request, params.get("name", ""), params.get("arguments") or {})
         except KeyError:
