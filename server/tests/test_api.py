@@ -1,14 +1,14 @@
 import datetime as dt
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from prodbat_server import api
-from prodbat_server.advisories import fixed_version, refresh_advisories
-from prodbat_server.models import Dependency, Incident, Job, Payment, Project, ServerError
+from prodbat_server.advisories import fixed_version
+from prodbat_server.models import Dependency, Incident, Job, PackageFacts, Payment, Project, ServerError
 from prodbat_server.stripe_events import product_name
 from prodbat_server.weekly import send_weekly
 
-from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_text, run, view
+from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_text, run, run_jobs, view
 
 ADMIN = {"authorization": "Bearer admin"}
 
@@ -200,12 +200,8 @@ def test_a_serious_fixed_problem_in_a_dependency_needs_a_look_until_it_is_upgrad
                                    "affected": [{"package": {"name": "jinja2"}, "ranges": [{"events": [{"fixed": "3.1.5"}]}]}]},
         }
 
-    async def go(sessions):
-        async with http_client(site) as http:
-            await refresh_advisories(sessions, http, SETTINGS)
-
     osv(vulnerable=True)
-    run(go, db)
+    run_jobs(db, site)
     incident = db.scalars(select(Incident)).one()
     assert (incident.kind, incident.key, incident.level) == ("advisory", "npm/lodash", "look")
     assert incident.what == ("Your app uses lodash 4.17.20, which is affected by GHSA-35jh: "
@@ -215,8 +211,10 @@ def test_a_serious_fixed_problem_in_a_dependency_needs_a_look_until_it_is_upgrad
     # A second serious problem with a later fix: the advice moves to the version that clears both.
     site.osv["/v1/querybatch"]["results"][0]["vulns"].append({"id": "GHSA-2nd"})
     site.json["/v3/advisories/GHSA-2nd"] = {"cvss3Score": 7.4}
-    project.advisories_checked_at = None
-    run(go, db)
+    # A day later: the site is due again, and so are the facts about its packages.
+    project.advisories_checked_at = days_ago(2)
+    db.execute(update(PackageFacts).values(advisories_checked_at=days_ago(2)))
+    run_jobs(db, site)
     assert incident.title == "lodash has 2 serious security problems"
     assert incident.what.endswith("Version 4.17.23 fixes all of them.") and "4.17.23 or later" in incident.todo
     # The one that is not serious is kept on the package and listed, never emailed.
@@ -233,7 +231,7 @@ def test_a_serious_fixed_problem_in_a_dependency_needs_a_look_until_it_is_upgrad
     packages[0]["version"] = "4.17.21"
     client.put("/api/dependencies", json={"packages": packages}, headers=key)
     osv(vulnerable=False)
-    run(go, db)
+    run_jobs(db, site)
     assert incident.ended_at is not None
     assert db.scalars(select(Dependency).where(Dependency.name == "lodash")).one().version == "4.17.21"
 

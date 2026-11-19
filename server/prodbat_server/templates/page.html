@@ -17,15 +17,11 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.5 Inter, system-ui, sans-serif; }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
-header.wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding-top: 20px; padding-bottom: 20px; }
-header .site { font-weight: 600; font-size: 17px; }
-nav.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); width: 100%; font-size: 15px; }
-nav.tabs a { padding: 10px 14px; text-decoration: none; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-nav.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); }
 .muted { color: var(--muted); font-size: 14px; }
 main.wrap { display: flex; flex-direction: column; gap: 40px; padding-top: 28px; padding-bottom: 64px; }
 .notice { background: var(--green-tint); color: #123F28; border-radius: 10px; padding: 12px 16px; font-weight: 500; }
 .status { display: flex; align-items: flex-start; gap: 22px; padding: 20px 0 8px; }
+.status .period { margin: 0 0 6px; }
 .status svg { flex: none; margin-top: 4px; }
 .status h1 { margin: 0 0 8px; font: 700 clamp(38px, 5.4vw, 68px)/1.02 'Bricolage Grotesque', Inter, sans-serif; letter-spacing: -0.025em; }
 .status p { margin: 0; font-size: 17px; color: var(--muted); }
@@ -78,30 +74,8 @@ code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.9em;
 #texts input, #webhook input[type=url], #github input:not([type]), #github select { font: inherit; min-height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid #B9BEB3; background: #FFF; min-width: min(260px, 100%); }
 #github input:not([type]) { width: min(520px, 100%); margin-top: 6px; }
 #github label { display: block; }
-.deps-box { overflow-x: auto; margin: 0 -2px; }
-table.deps { width: 100%; border-collapse: collapse; font-size: 15px; }
-.deps th, .deps td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-top: 1px solid var(--soft-line); }
-.deps thead th { border-top: 0; padding-top: 0; color: var(--muted); font-size: 14px; font-weight: 500; }
-.deps tr.group th { padding-top: 18px; font-size: 14px; font-weight: 600; border-top: 0; }
-.deps td.name { min-width: 0; overflow-wrap: anywhere; }
-.deps td.name .muted { margin-top: 2px; }
-.deps td.ver { white-space: nowrap; }
-.deps tr.more td { color: var(--muted); font-size: 14px; }
-.eco { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 12px; line-height: 18px; vertical-align: 1px; }
-.pill { display: inline-block; white-space: nowrap; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
-.pill-broken { background: var(--red-tint); color: var(--red); }
-.pill-look { background: #FFF4DB; color: var(--amber); }
-.pill-muted { background: var(--soft-line); color: var(--muted); }
-.pill-working { background: var(--green-tint); color: var(--green); }
-@media (max-width: 640px) {
-  .deps thead { display: none; }
-  .deps, .deps tbody, .deps tr, .deps td, .deps th { display: block; }
-  .deps tr:not(.group):not(.more) { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; padding: 10px 0; border-top: 1px solid var(--soft-line); }
-  .deps td { border: 0; padding: 0; }
-  .deps td.name { flex: 1 0 100%; }
-  .deps td.ver::before { content: attr(data-label) " "; color: var(--muted); font-family: Inter, system-ui, sans-serif; font-size: 13px; }
-  .deps tr.more td { padding: 10px 0; border-top: 1px solid var(--soft-line); }
-}
+{% include "_deps_style.html" %}
+{% include "_nav_style.html" %}
 footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
 </style>
 </head>
@@ -112,22 +86,16 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 {% macro ring(size) %}<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.5" fill="#FFF" stroke="#555C63" stroke-width="3"/></svg>{% endmacro %}
 {% macro copy_button(target, label, class="") %}<button type="button" class="{{ class }}" data-copy="{{ target }}">{{ label }}</button>{% endmacro %}
 
-<header class="wrap">
-<svg width="26" height="24" viewBox="0 0 26 24" role="img" aria-label="Prodbat"><path d="M2 3 L8 9 L13 6 L18 9 L24 3 V17 a5 5 0 0 1 -5 5 H7 a5 5 0 0 1 -5 -5 Z" fill="#15181B"/></svg>
-<span class="site">{{ page.domain }}</span>
-{% if page.status != 'waiting' %}<span class="muted">The last 7 days</span>{% endif %}
-<nav class="tabs" aria-label="Views">
-<a href="/d/{{ token }}" aria-current="page">Overview</a>
-{% for key, label in (('errors', 'Errors'), ('logs', 'Logs'), ('metrics', 'Metrics'), ('uptime', 'Uptime'), ('jobs', 'Jobs'), ('packages', 'Packages')) %}<a href="/d/{{ token }}/{{ key }}">{{ label }}</a>{% endfor %}
-</nav>
-</header>
+<div class="shell">
+{% with domain=page.domain %}{% include "_nav.html" %}{% endwith %}
+<div class="content">
 
 <main class="wrap">
 {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
 
 <section class="status {{ page.status }}">
 {% if page.status == 'broken' %}{{ cross(64) }}{% elif page.status == 'look' %}{{ warn(64) }}{% elif page.status == 'working' %}{{ tick(64) }}{% else %}{{ ring(64) }}{% endif %}
-<div><h1>{{ page.sentence }}</h1><p>{{ page.proof }}</p></div>
+<div>{% if page.status != 'waiting' %}<p class="muted period">The last 7 days</p>{% endif %}<h1>{{ page.sentence }}</h1><p>{{ page.proof }}</p></div>
 </section>
 
 {% if paused %}
@@ -261,16 +229,7 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 <p class="empty">No package list yet. Your coding agent sends it with <span class="mono">npx prodbat deps</span>, and every package is then checked each day for security problems and end of support.</p>
 {% else %}
 <p class="muted">{% if deps.sent %}The list was last sent on {{ deps.sent }}. {% endif %}{% if deps.problems %}{{ deps.problems }} {{ 'needs' if deps.problems == 1 else 'need' }} a look.{% else %}Nothing known against them.{% endif %} Your coding agent sends it again with <span class="mono">npx prodbat deps</span>.</p>
-<div class="deps-box">
-<table class="deps">
-<thead><tr><th scope="col">Name</th><th scope="col">Current</th><th scope="col">Latest</th><th scope="col">Status</th></tr></thead>
-{% for group in deps.groups %}<tbody>
-<tr class="group"><th colspan="4" scope="colgroup">{{ group.title }}</th></tr>
-{% for r in group.rows %}<tr><td class="name"><span class="mono">{{ r.display }}</span><span class="eco">{{ r.label }}</span>{% for note in r.notes %}<div class="muted">{{ note }}</div>{% endfor %}</td><td class="ver mono" data-label="Current">{{ r.current }}</td><td class="ver mono" data-label="Latest">{{ r.latest or '–' }}</td><td><span class="pill pill-{{ r.pill }}">{{ r.status_label }}</span></td></tr>
-{% endfor %}{% if group.level == 'indirect' and deps.hidden_note %}<tr class="more"><td colspan="4">{{ deps.hidden_note }}</td></tr>
-{% endif %}</tbody>
-{% endfor %}</table>
-</div>
+{% include "_deps_table.html" %}
 {% endif %}
 </section>
 
@@ -457,6 +416,8 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 </span>
 </footer>
 </main>
+</div>
+</div>
 <script>
 document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-copy]');

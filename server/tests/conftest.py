@@ -38,12 +38,11 @@ def project(db):
 
 @pytest.fixture(autouse=True)
 def forget_what_was_looked_up():
-    """Advisories and release data are remembered between passes; not between tests."""
-    from prodbat_server import advisories, freshness
+    """Advisories are remembered between passes; not between tests."""
+    from prodbat_server import advisories
 
     advisories._details.clear()
     advisories._scores.clear()
-    freshness._cache.clear()
 
 
 @pytest.fixture

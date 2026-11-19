@@ -1,0 +1,26 @@
+{# The dependencies table's styles, shared by the page and the Packages tab. #}
+.deps-box { overflow-x: auto; margin: 0 -2px; }
+table.deps { width: 100%; border-collapse: collapse; font-size: 15px; }
+.deps th, .deps td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-top: 1px solid #ECEEE8; }
+.deps thead th { border-top: 0; padding-top: 0; color: var(--muted); font-size: 14px; font-weight: 500; }
+.deps tr.group th { padding-top: 18px; font-size: 14px; font-weight: 600; border-top: 0; }
+.deps td.name { min-width: 0; overflow-wrap: anywhere; }
+.deps td.name .muted { margin-top: 2px; }
+.deps td.ver { white-space: nowrap; }
+.deps th, .deps td { border-bottom: 0; }
+.deps tr.more td { color: var(--muted); font-size: 14px; }
+.eco { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 12px; line-height: 18px; vertical-align: 1px; }
+.pill { display: inline-block; white-space: nowrap; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.pill-broken { background: #FBE8DE; color: #B93A0B; }
+.pill-look { background: #FFF4DB; color: #7A5200; }
+.pill-muted { background: #ECEEE8; color: var(--muted); }
+.pill-working { background: #E3F1E8; color: #1B7245; }
+@media (max-width: 640px) {
+  .deps thead { display: none; }
+  .deps, .deps tbody, .deps tr, .deps td, .deps th { display: block; }
+  .deps tr:not(.group):not(.more) { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; padding: 10px 0; border-top: 1px solid #ECEEE8; }
+  .deps td { border: 0; padding: 0; }
+  .deps td.name { flex: 1 0 100%; }
+  .deps td.ver::before { content: attr(data-label) " "; color: var(--muted); font-family: Inter, system-ui, sans-serif; font-size: 13px; }
+  .deps tr.more td { padding: 10px 0; border-top: 1px solid #ECEEE8; }
+}

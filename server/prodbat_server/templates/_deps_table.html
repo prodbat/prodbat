@@ -1,0 +1,11 @@
+{# The dependencies table: `deps` from dependencies.build(). #}
+<div class="deps-box">
+<table class="deps">
+<thead><tr><th scope="col">Name</th><th scope="col">Current</th><th scope="col">Latest</th><th scope="col">Status</th></tr></thead>
+{% for group in deps.groups %}<tbody>
+<tr class="group"><th colspan="4" scope="colgroup">{{ group.title }}</th></tr>
+{% for r in group.rows %}<tr><td class="name"><span class="mono">{{ r.display }}</span><span class="eco">{{ r.label }}</span>{% for note in r.notes %}<div class="muted">{{ note }}</div>{% endfor %}</td><td class="ver mono" data-label="Current">{{ r.current }}</td><td class="ver mono" data-label="Latest">{{ r.latest or '–' }}</td><td><span class="pill pill-{{ r.pill }}">{{ r.status_label }}</span></td></tr>
+{% endfor %}{% if group.level == 'indirect' and deps.hidden_note %}<tr class="more"><td colspan="4">{{ deps.hidden_note }}</td></tr>
+{% endif %}</tbody>
+{% endfor %}</table>
+</div>

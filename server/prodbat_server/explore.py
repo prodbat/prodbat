@@ -10,7 +10,8 @@ from sqlalchemy import select, text
 
 from .api import LEVELS, find_logs
 from .charts import RANGES, bars, counts, spark, window
-from .models import Dependency, Incident, Job, QueueReport
+from . import dependencies
+from .models import Incident, Job, QueueReport
 from .page import PRIVATE, project_by_token, templates
 from .tasks import path_value, where_value
 from .words import money
@@ -300,29 +301,10 @@ async def jobs(request: Request, token: str, range: str = "24h"):
 # ---- packages -------------------------------------------------------------------------
 
 @router.get("/d/{token}/packages", response_class=HTMLResponse)
-async def packages(request: Request, token: str, show: str = "problems"):
+async def packages(request: Request, token: str, show: str = "all"):
+    """The same table as the page, with every indirect package listed too."""
+    show = "problems" if show == "problems" else "all"
     async with request.app.state.sessions() as db:
         project = await project_by_token(request, db, token)
-        deps = (await db.scalars(select(Dependency).where(Dependency.project_id == project.id)
-                                 .order_by(Dependency.ecosystem, Dependency.name))).all()
-        # Serious advisories and end-of-life notices are open problems, keyed by package.
-        open_problems = (await db.scalars(select(Incident).where(
-            Incident.project_id == project.id, Incident.ended_at.is_(None)))).all()
-    by_package: dict[tuple, list[str]] = {}
-    for incident in open_problems:
-        data = incident.data or {}
-        if data.get("name"):
-            by_package.setdefault((data.get("ecosystem"), data["name"]), []).append(incident.title)
-    rows = []
-    for d in deps:
-        problems = by_package.get((d.ecosystem, d.name), []) + [
-            i.get("summary") or i.get("id") or str(i) if isinstance(i, dict) else str(i) for i in (d.issues or [])]
-        if d.deprecated:
-            problems.append(f"Deprecated: {d.deprecated}")
-        rows.append({"ecosystem": d.ecosystem, "name": d.name, "version": d.version, "latest": d.latest,
-                     "direct": d.direct, "problems": problems,
-                     "behind": bool(d.latest and d.latest != d.version)})
-    shown = [r for r in rows if r["problems"]] if show == "problems" else rows
-    return view(request, "packages.html", project, token, "packages", packages=shown, total=len(rows),
-                with_problems=sum(1 for r in rows if r["problems"]), show=show)
-
+        deps = await dependencies.table(db, project, every=True, problems_only=show == "problems")
+    return view(request, "packages.html", project, token, "packages", deps=deps, show=show)

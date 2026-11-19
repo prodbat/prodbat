@@ -4,11 +4,11 @@ import pytest
 from sqlalchemy import select
 
 from prodbat_server.flows import discover_pages, flow_for
-from prodbat_server.freshness import find_cycle, refresh_freshness, supported_cycle
+from prodbat_server.freshness import find_cycle, supported_cycle
 from prodbat_server.models import Dependency, Incident, LogLine, QueueReport, ServerError, SiteCheck
 from prodbat_server.worker import prune
 
-from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_text, run, run_checks, view
+from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_text, run, run_checks, run_jobs, view
 
 
 def incidents(db):
@@ -247,11 +247,7 @@ def test_release_lines_and_what_to_move_to():
 
 
 def versions(site, db, node_releases=()):
-    async def go(sessions):
-        async with http_client(site) as http:
-            await refresh_freshness(sessions, http, SETTINGS)
-
-    run(go, db)
+    run_jobs(db, site)
 
 
 def dev(name, version, deprecated="", system="NPM"):

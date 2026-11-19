@@ -1,0 +1,8 @@
+{# The side menu on the page and every view: needs `token`, `domain`, and `tab` (Overview when unset). #}
+{% set current = tab | default('overview') %}
+<aside class="side">
+<a class="brand" href="/d/{{ token }}"><svg width="22" height="20" viewBox="0 0 26 24" role="img" aria-label="Prodbat"><path d="M2 3 L8 9 L13 6 L18 9 L24 3 V17 a5 5 0 0 1 -5 5 H7 a5 5 0 0 1 -5 -5 Z" fill="#15181B"/></svg><span>{{ domain }}</span></a>
+<nav class="views" aria-label="Views">
+{% for key, label in (('overview', 'Overview'), ('errors', 'Errors'), ('logs', 'Logs'), ('metrics', 'Metrics'), ('uptime', 'Uptime'), ('jobs', 'Jobs'), ('packages', 'Packages')) %}<a href="/d/{{ token }}{% if key != 'overview' %}/{{ key }}{% endif %}"{% if current == key %} aria-current="page"{% endif %}>{{ label }}</a>
+{% endfor %}</nav>
+</aside>

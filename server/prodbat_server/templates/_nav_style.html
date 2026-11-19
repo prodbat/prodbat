@@ -1,0 +1,17 @@
+{# The side menu's styles. On a phone it becomes a bar over the page with the views in a row that scrolls sideways. #}
+.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+.shell > .content { min-width: 0; }
+.side { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 18px 12px; background: #EDEFE9; border-right: 1px solid #DADDD5; }
+.side .brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px; color: #15181B; font-weight: 600; font-size: 15px; text-decoration: none; overflow-wrap: anywhere; }
+.side .brand svg { flex: none; }
+.views { display: flex; flex-direction: column; gap: 2px; }
+.views a { padding: 8px 10px; border-radius: 8px; color: #555C63; font-size: 14px; font-weight: 500; text-decoration: none; }
+.views a:hover { background: #E2E5DD; color: #15181B; }
+.views a[aria-current="page"] { background: #FFFFFF; color: #15181B; box-shadow: 0 0 0 1px #DADDD5; }
+@media (max-width: 800px) {
+  .shell { display: block; }
+  .side { position: static; height: auto; gap: 8px; padding: 12px 0 0; border-right: 0; border-bottom: 1px solid #DADDD5; }
+  .side .brand { padding: 4px 14px; }
+  .views { flex-direction: row; overflow-x: auto; padding: 0 10px 10px; }
+  .views a { white-space: nowrap; }
+}

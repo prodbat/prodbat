@@ -10,17 +10,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
-:root { --ground: #F4F5F1; --card: #FFFFFF; --ink: #15181B; --muted: #555C63; --line: #DADDD5; --soft: #ECEEE8;
+:root { --soft-line: #ECEEE8; --ground: #F4F5F1; --card: #FFFFFF; --ink: #15181B; --muted: #555C63; --line: #DADDD5; --soft: #ECEEE8;
   --green: #1B7245; --red: #B93A0B; --amber: #B7791F; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.5 Inter, system-ui, sans-serif; }
 a { color: var(--ink); }
 .wrap { max-width: 1240px; margin: 0 auto; padding: 0 28px; }
-header.wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding-top: 16px; padding-bottom: 0; }
-header .site { font-weight: 600; font-size: 16px; text-decoration: none; }
-nav.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); width: 100%; margin-top: 6px; }
-nav.tabs a { padding: 10px 14px; text-decoration: none; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-nav.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); }
 main.wrap { display: flex; flex-direction: column; gap: 20px; padding-top: 22px; padding-bottom: 60px; }
 h1 { margin: 0; font-size: 22px; font-weight: 600; }
 h2 { margin: 0; font-size: 16px; font-weight: 600; }
@@ -63,21 +58,19 @@ figure.chart figcaption { display: flex; justify-content: space-between; }
 .strip i { width: 6px; height: 18px; border-radius: 2px; background: var(--green); display: block; }
 .strip i.down { background: var(--red); } .strip i.unknown { background: #C8CCC4; }
 @media (max-width: 640px) { .wrap { padding: 0 14px; } }
+{% include "_nav_style.html" %}
+{% include "_deps_style.html" %}
 </style>
 </head>
 <body>
-<header class="wrap">
-<svg width="22" height="20" viewBox="0 0 26 24" aria-hidden="true"><path d="M2 3 L8 9 L13 6 L18 9 L24 3 V17 a5 5 0 0 1 -5 5 H7 a5 5 0 0 1 -5 -5 Z" fill="#15181B"/></svg>
-<a class="site" href="/d/{{ token }}">{{ domain }}</a>
-<nav class="tabs" aria-label="Views">
-{% for key, label in (('overview', 'Overview'), ('errors', 'Errors'), ('logs', 'Logs'), ('metrics', 'Metrics'), ('uptime', 'Uptime'), ('jobs', 'Jobs'), ('packages', 'Packages')) %}
-<a href="/d/{{ token }}{% if key != 'overview' %}/{{ key }}{% endif %}"{% if tab == key %} aria-current="page"{% endif %}>{{ label }}</a>
-{% endfor %}
-</nav>
-</header>
+<div class="shell">
+{% include "_nav.html" %}
+<div class="content">
 <main class="wrap">
 {% block main %}{% endblock %}
 </main>
+</div>
+</div>
 <script>
 document.addEventListener('click', function (e) {
   var b = e.target.closest('[data-copy]');

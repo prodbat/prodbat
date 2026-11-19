@@ -14,6 +14,8 @@ import httpx
 from sqlalchemy import select
 
 from .config import Settings
+from .facts import ADVISORIES_TTL, package_facts, stale
+from .facts import key as fact_key
 from .incidents import digest, report, resolve
 from .models import Dependency, Incident, Project
 
@@ -87,19 +89,19 @@ async def known_problems(client: httpx.AsyncClient, ecosystem: str, name: str, v
     return found
 
 
-async def find_problems(client: httpx.AsyncClient, deps: list[Dependency]):
-    """Returns (serious, lesser): dependency id -> [(advisory, fixed version)]
-    for the ones to tell the owner about, and dependency id -> sentences
+async def find_problems(client: httpx.AsyncClient, packages: list) -> None:
+    """Asks OSV about each package version (a PackageFacts row) and keeps
+    on it the serious problems, to tell the owner about, and sentences
     for the rest."""
-    serious: dict[int, list[tuple[dict, str]]] = {}
-    lesser: dict[int, list[str]] = {}
     lookups = 0
-    for start in range(0, len(deps), 500):
-        batch = deps[start:start + 500]
+    for start in range(0, len(packages), 500):
+        batch = packages[start:start + 500]
         response = await client.post(f"{OSV}/querybatch", json={"queries": [
-            {"package": {"name": d.name, "ecosystem": d.ecosystem}, "version": d.version} for d in batch]})
+            {"package": {"name": p.name, "ecosystem": p.ecosystem}, "version": p.version} for p in batch]})
         response.raise_for_status()
-        for dep, result in zip(batch, response.json().get("results", []), strict=False):
+        found = []
+        for package, result in zip(batch, response.json().get("results", []), strict=False):
+            serious, lesser = [], []
             seen_aliases: set[str] = set()
             for ref in (result or {}).get("vulns", []):
                 vid = ref["id"]
@@ -116,66 +118,75 @@ async def find_problems(client: httpx.AsyncClient, deps: list[Dependency]):
                 if names & seen_aliases:
                     continue
                 seen_aliases |= names
-                fix = fixed_version(vuln, dep.name, dep.version)
+                fix = fixed_version(vuln, package.name, package.version)
                 rated = await rating(client, vuln)
                 if rated.upper() in SERIOUS and fix:
-                    serious.setdefault(dep.id, []).append((vuln, fix))
+                    serious.append({"id": vid, "summary": vuln.get("summary"), "fixed": fix})
                 else:
                     summary = (vuln.get("summary") or "a security problem").rstrip(".")
                     fixed = f"fixed in {fix}" if fix else "no fix yet"
-                    lesser.setdefault(dep.id, []).append(f"{vid}: {summary} ({rated}, {fixed})")
-    return serious, lesser
+                    lesser.append(f"{vid}: {summary} ({rated}, {fixed})")
+            found.append((package, serious, lesser))
+        # Only once the whole batch is known, so a failure part way leaves the old facts.
+        for package, serious, lesser in found:
+            package.serious, package.issues = serious, lesser
 
 
-async def refresh_advisories(sessions, client: httpx.AsyncClient, settings: Settings) -> None:
-    """Once a day per site, and straight after its package list changes."""
-    now = dt.datetime.now(dt.UTC)
-    async with sessions() as db:
-        stale = (await db.scalars(select(Project).where(Project.paused_at.is_(None)).where(
-            (Project.advisories_checked_at.is_(None)) | (Project.advisories_checked_at < now - dt.timedelta(days=1)))
-            .limit(20))).all()
-        for project in stale:
-            project.advisories_checked_at = now
-            deps = (await db.scalars(select(Dependency).where(
-                Dependency.project_id == project.id, Dependency.ecosystem != "runtime"))).all()
-            try:
-                serious, lesser = await find_problems(client, deps) if deps else ({}, {})
-            except (httpx.HTTPError, ValueError, KeyError):
-                await db.commit()
-                continue
-            wrong = set()
-            new: list = []
-            for dep in deps:
-                dep.issues = lesser.get(dep.id, [])[:10]
-                if dep.id not in serious:
-                    continue
-                found = serious[dep.id]
-                vuln = found[0][0]
-                # The version to move to has to clear every serious problem, not only the first.
-                fix = max((f for _, f in found), key=version_key)
-                key = f"{dep.ecosystem}/{dep.name}"
-                wrong.add(key)
-                summary = (vuln.get("summary") or "a security problem").strip().rstrip(".")
-                indirect = "" if dep.direct else " Your app does not name this package itself; another package brings it in."
-                if len(found) == 1:
-                    title = f"{dep.name} has a serious security problem"
-                    affected = f"is affected by {vuln['id']}: {summary}. It is fixed in {fix}."
-                else:
-                    title = f"{dep.name} has {len(found)} serious security problems"
-                    affected = (f"is affected by {len(found)} serious security problems, including {vuln['id']}: "
-                                f"{summary}. Version {fix} fixes all of them.")
-                await report(
-                    db, project, settings, kind="advisory", key=key, level="look", title=title,
-                    what=f"Your app uses {dep.name} {dep.version}, which {affected}{indirect}",
-                    who="Nobody yet, as far as we can tell.",
-                    todo=f"Ask your coding agent to upgrade {dep.name} to {fix} or later, check that nothing "
-                         f"else breaks, and deploy.",
-                    started_at=now, gather=new,
-                    data={"ecosystem": dep.ecosystem, "name": dep.name, "version": dep.version, "to": fix,
-                          "direct": dep.direct, "count": len(found)})
-            digest(db, project, new, settings, "security problems in your packages")
-            for incident in await db.scalars(select(Incident).where(
-                    Incident.project_id == project.id, Incident.kind == "advisory", Incident.ended_at.is_(None))):
-                if incident.key not in wrong:
-                    resolve(db, project, incident, settings, now)
-            await db.commit()
+async def check_advisories(db, project: Project, client: httpx.AsyncClient, settings: Settings,
+                           now: dt.datetime) -> None:
+    """One site's packages against OSV. Run by the queue once a day per
+    site, and straight after its package list changes. Versions another
+    site's check asked about lately are not asked about again. The caller
+    commits."""
+    project.advisories_checked_at = now
+    deps = (await db.scalars(select(Dependency).where(
+        Dependency.project_id == project.id, Dependency.ecosystem != "runtime"))).all()
+    facts = await package_facts(db, deps)
+    due = [f for f in facts.values() if stale(f.advisories_checked_at, ADVISORIES_TTL, now)]
+    if due:
+        try:
+            await find_problems(client, due)
+        except (httpx.HTTPError, ValueError, KeyError):
+            # Older facts will do until the next check, but a version never
+            # asked about leaves the alerts as they are.
+            if any(f.advisories_checked_at is None for f in due):
+                return
+        else:
+            for f in due:
+                f.advisories_checked_at = now
+    wrong = set()
+    new: list = []
+    for dep in deps:
+        fact = facts[fact_key(dep)]
+        dep.issues = fact.issues[:10]
+        if not fact.serious:
+            continue
+        found = fact.serious
+        first = found[0]
+        # The version to move to has to clear every serious problem, not only the first.
+        fix = max((f["fixed"] for f in found), key=version_key)
+        key = f"{dep.ecosystem}/{dep.name}"
+        wrong.add(key)
+        summary = (first["summary"] or "a security problem").strip().rstrip(".")
+        indirect = "" if dep.direct else " Your app does not name this package itself; another package brings it in."
+        if len(found) == 1:
+            title = f"{dep.name} has a serious security problem"
+            affected = f"is affected by {first['id']}: {summary}. It is fixed in {fix}."
+        else:
+            title = f"{dep.name} has {len(found)} serious security problems"
+            affected = (f"is affected by {len(found)} serious security problems, including {first['id']}: "
+                        f"{summary}. Version {fix} fixes all of them.")
+        await report(
+            db, project, settings, kind="advisory", key=key, level="look", title=title,
+            what=f"Your app uses {dep.name} {dep.version}, which {affected}{indirect}",
+            who="Nobody yet, as far as we can tell.",
+            todo=f"Ask your coding agent to upgrade {dep.name} to {fix} or later, check that nothing "
+                 f"else breaks, and deploy.",
+            started_at=now, gather=new,
+            data={"ecosystem": dep.ecosystem, "name": dep.name, "version": dep.version, "to": fix,
+                  "direct": dep.direct, "count": len(found)})
+    digest(db, project, new, settings, "security problems in your packages")
+    for incident in await db.scalars(select(Incident).where(
+            Incident.project_id == project.id, Incident.kind == "advisory", Incident.ended_at.is_(None))):
+        if incident.key not in wrong:
+            resolve(db, project, incident, settings, now)

@@ -78,9 +78,18 @@ def test_logs_metrics_uptime_jobs_and_packages_render_with_data(client, db, proj
     assert "75.00%" in uptime and "Node.js 20 no longer gets security fixes" in uptime
     jobs = text_of(client, f"/d/{t}/jobs")
     assert "nightly-email" in jobs and "On time" in jobs and "now 140 waiting, oldest 22 min" in jobs
+    # The same table as the page, but every indirect package is listed, not only those with a problem.
+    db.add(Dependency(project_id=project.id, ecosystem="npm", name="ms", version="2.1.3", latest="2.1.3",
+                      direct=False, issues=[], facts_checked_at=NOW))
+    db.commit()
     packages = text_of(client, f"/d/{t}/packages")
-    assert "1 of 2 need attention" in packages and "Prototype pollution" in packages and "next" not in packages.split("Problems", 1)[1]
-    assert "15.1.0" in text_of(client, f"/d/{t}/packages", show="all")
+    assert "Packages 1 of 3 needs a look" in packages
+    assert "lodash npm 1 known security problem. Version 4.17.21 fixes it. 4.17.20 4.17.21 Security problem" in packages
+    assert "next npm Being looked up." in packages and "15.1.0 15.1.0 Checking" in packages
+    assert "Packages pulled in by other packages ms npm 2.1.3 2.1.3 OK" in packages
+    problems = text_of(client, f"/d/{t}/packages", show="problems").split("Need a look", 1)[1]
+    assert "lodash" in problems and "next npm" not in problems and "ms npm" not in problems
+    assert 'aria-current="page">Packages' in client.get(f"/d/{t}/packages").text
 
 
 def test_every_view_works_empty_and_the_overview_links_to_them(client, project):

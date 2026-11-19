@@ -107,7 +107,7 @@ def row(dep: Dependency, found: dict[str, Incident], checked: bool) -> dict:
     if not statuses:
         statuses.append("ok" if checked else "checking")
         if not checked:
-            notes.append("Being looked up. This takes a few minutes after the list is sent.")
+            notes.append("Being looked up. This takes a few seconds after the list is sent.")
     status = min(statuses, key=ORDER.index)
     label, pill = STATUSES[status]
     known = PRODUCTS.get((dep.ecosystem, dep.name.lower()))
@@ -121,8 +121,11 @@ def row(dep: Dependency, found: dict[str, Incident], checked: bool) -> dict:
     }
 
 
-def build(project: Project, deps: list[Dependency], incidents: list[Incident]) -> dict:
-    """The table, from the package rows and the project's open problems."""
+def build(project: Project, deps: list[Dependency], incidents: list[Incident], every: bool = False,
+          problems_only: bool = False) -> dict:
+    """The table, from the package rows and the project's open problems. The page shows
+    indirect packages only when they have a problem; the Packages tab can show `every`
+    one, or only the packages with a problem."""
     by_package: dict[tuple, dict[str, Incident]] = {}
     for incident in incidents:
         if incident.ended_at is not None or incident.kind not in ("advisory", "eol", "runtime"):
@@ -150,7 +153,9 @@ def build(project: Project, deps: list[Dependency], incidents: list[Incident]) -
     hidden = hidden_checking = 0
     for level, title in GROUPS:
         mine = sorted((r for r in rows if r["level"] == level), key=order)
-        if level == "indirect":
+        if problems_only:
+            mine = [r for r in mine if r["problem"]]
+        elif level == "indirect" and not every:
             shown = [r for r in mine if r["problem"]]
             hidden = len(mine) - len(shown)
             hidden_checking = sum(1 for r in mine if r["status"] == "checking")
@@ -177,12 +182,12 @@ def build(project: Project, deps: list[Dependency], incidents: list[Incident]) -
     }
 
 
-async def table(db, project: Project) -> dict:
+async def table(db, project: Project, every: bool = False, problems_only: bool = False) -> dict:
     deps = (await db.scalars(select(Dependency).where(Dependency.project_id == project.id))).all()
     incidents = (await db.scalars(select(Incident).where(
         Incident.project_id == project.id, Incident.ended_at.is_(None),
         Incident.kind.in_(("advisory", "eol", "runtime"))))).all()
-    return build(project, list(deps), list(incidents))
+    return build(project, list(deps), list(incidents), every, problems_only)
 
 
 def as_json(found: dict) -> dict:

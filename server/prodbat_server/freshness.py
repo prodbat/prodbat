@@ -16,22 +16,22 @@ alert; it is listed on the page and in the weekly email.
 
 import datetime as dt
 import re
-import time
 from urllib.parse import quote
 
 import httpx
 from sqlalchemy import select
 
 from .config import Settings
+from .facts import DEPRECATED_TTL, EOL_TTL, LATEST_TTL, NODE_RELEASES_TTL, eol_facts, package_facts, stale
+from .facts import key as fact_key
 from .incidents import digest, report, resolve
-from .models import Dependency, Incident, Project
+from .models import Dependency, Incident, PackageFacts, Project
 from .words import day, plural
 
 EOL_API = "https://endoflife.date/api/{product}.json"
 DEPS_DEV = "https://api.deps.dev"
 NODE_RELEASES = "https://nodejs.org/dist/index.json"
 WARN = dt.timedelta(days=60)
-RECHECK_FACTS = dt.timedelta(days=7)
 MAX_LATEST_LOOKUPS = 150
 
 # Our ecosystem names -> deps.dev's.
@@ -78,9 +78,6 @@ PRODUCTS = {
     ("Packagist", "drupal/core"): ("drupal", "Drupal"),
 }
 
-_cache: dict[str, tuple[float, list]] = {}
-
-
 def parts(version: str) -> tuple[int, ...]:
     return tuple(int(n) for n in re.findall(r"\d+", version)[:3])
 
@@ -116,17 +113,6 @@ def supported_cycle(cycles: list[dict], today: dt.date) -> str | None:
     return str(best["cycle"]) if best else None
 
 
-async def fetched(client: httpx.AsyncClient, url: str) -> list:
-    """A JSON list from `url`, kept for a day."""
-    cached = _cache.get(url)
-    if cached and time.monotonic() - cached[0] < 86400:
-        return cached[1]
-    response = await client.get(url)
-    response.raise_for_status()
-    _cache[url] = (time.monotonic(), response.json())
-    return _cache[url][1]
-
-
 def majors_behind(dep: Dependency) -> int:
     if not dep.latest or dep.ecosystem == "runtime":
         return 0
@@ -140,15 +126,14 @@ def patch_behind(dep: Dependency) -> bool:
             and parts(dep.latest) > parts(dep.version))
 
 
-def deps_dev_version(dep: Dependency) -> str:
+def deps_dev_version(dep) -> str:
     return f"v{dep.version}" if dep.ecosystem == "Go" and not dep.version.startswith("v") else dep.version
 
 
-async def check_deprecations(client: httpx.AsyncClient, deps: list[Dependency], now: dt.datetime) -> None:
+async def check_deprecations(client: httpx.AsyncClient, packages: list[PackageFacts], now: dt.datetime) -> None:
     """Ask deps.dev about every package version not asked about lately.
     One request covers up to a thousand of them."""
-    due = [d for d in deps if d.ecosystem in SYSTEMS
-           and (d.facts_checked_at is None or d.facts_checked_at < now - RECHECK_FACTS)]
+    due = [p for p in packages if p.ecosystem in SYSTEMS and stale(p.deprecated_checked_at, DEPRECATED_TTL, now)]
     for start in range(0, len(due), 1000):
         chunk = due[start:start + 1000]
         body = {"requests": [{"versionKey": {"system": SYSTEMS[d.ecosystem], "name": d.name,
@@ -165,15 +150,15 @@ async def check_deprecations(client: httpx.AsyncClient, deps: list[Dependency], 
             if not data.get("nextPageToken"):
                 break
             body["pageToken"] = data["nextPageToken"]
-        for dep in chunk:
-            info = found.get((SYSTEMS[dep.ecosystem], dep.name, deps_dev_version(dep)))
-            dep.facts_checked_at = now
+        for package in chunk:
+            info = found.get((SYSTEMS[package.ecosystem], package.name, deps_dev_version(package)))
+            package.deprecated_checked_at = now
             if info is not None:
                 reason = (info.get("deprecatedReason") or "").strip()
-                dep.deprecated = (reason or "deprecated by its authors")[:500] if info.get("isDeprecated") else None
+                package.deprecated = (reason or "deprecated by its authors")[:500] if info.get("isDeprecated") else None
 
 
-async def newest_version(client: httpx.AsyncClient, dep: Dependency) -> str | None:
+async def newest_version(client: httpx.AsyncClient, dep) -> str | None:
     try:
         response = await client.get(
             f"{DEPS_DEV}/v3/systems/{SYSTEMS[dep.ecosystem].lower()}/packages/{quote(dep.name, safe='')}")
@@ -185,8 +170,15 @@ async def newest_version(client: httpx.AsyncClient, dep: Dependency) -> str | No
         return None
 
 
-async def check_project(db, project: Project, client: httpx.AsyncClient, settings: Settings, now: dt.datetime) -> None:
+async def check_freshness(db, project: Project, client: httpx.AsyncClient, settings: Settings,
+                          now: dt.datetime) -> None:
+    """One site's language, frameworks and packages. Run by the queue once
+    a day per site, and straight after its package list changes. Only
+    facts that are missing or past their time (facts.py) are asked for.
+    The caller commits."""
+    project.freshness_checked_at = now
     deps = (await db.scalars(select(Dependency).where(Dependency.project_id == project.id))).all()
+    kept = await package_facts(db, [d for d in deps if d.ecosystem in SYSTEMS])
     today = now.date()
     wrong: set[tuple[str, str]] = set()
     new: list = []
@@ -202,9 +194,8 @@ async def check_project(db, project: Project, client: httpx.AsyncClient, setting
         if not known:
             continue
         product, name = known
-        try:
-            cycles = await fetched(client, EOL_API.format(product=product))
-        except (httpx.HTTPError, ValueError):
+        cycles = await eol_facts(db, client, product, EOL_API.format(product=product), EOL_TTL, now)
+        if not cycles:
             continue
         cycle = find_cycle(cycles, dep.version)
         if cycle is None:
@@ -233,10 +224,7 @@ async def check_project(db, project: Project, client: httpx.AsyncClient, setting
     # Node.js says which of its releases fixed security problems.
     node = next((d for d in deps if d.ecosystem == "runtime" and d.name == "node" and len(parts(d.version)) == 3), None)
     if node is not None and ("eol", "nodejs") not in wrong:
-        try:
-            releases = await fetched(client, NODE_RELEASES)
-        except (httpx.HTTPError, ValueError):
-            releases = []
+        releases = await eol_facts(db, client, "nodejs-releases", NODE_RELEASES, NODE_RELEASES_TTL, now) or []
         newer = [r for r in releases if parts(r["version"])[:1] == parts(node.version)[:1]
                  and parts(r["version"]) > parts(node.version)]
         missed = sum(1 for r in newer if r.get("security"))
@@ -252,9 +240,13 @@ async def check_project(db, project: Project, client: httpx.AsyncClient, setting
 
     # Deprecated or withdrawn by their authors: every package, named or pulled in.
     try:
-        await check_deprecations(client, deps, now)
+        await check_deprecations(client, list(kept.values()), now)
     except (httpx.HTTPError, ValueError, KeyError):
-        pass
+        pass  # what was known before still holds
+    for dep in deps:
+        package = kept.get(fact_key(dep))
+        if package is not None and package.deprecated_checked_at is not None:
+            dep.deprecated, dep.facts_checked_at = package.deprecated, package.deprecated_checked_at
     advised = {i.key for i in await db.scalars(select(Incident).where(
         Incident.project_id == project.id, Incident.kind == "advisory", Incident.ended_at.is_(None)))}
     for dep in deps:
@@ -276,17 +268,9 @@ async def check_project(db, project: Project, client: httpx.AsyncClient, setting
 
     # The newest version of each package the project names itself.
     for dep in [d for d in deps if d.direct and d.ecosystem in SYSTEMS][:MAX_LATEST_LOOKUPS]:
-        dep.latest = await newest_version(client, dep) or dep.latest
-
-
-async def refresh_freshness(sessions, client: httpx.AsyncClient, settings: Settings) -> None:
-    """Once a day per site, and straight after its package list changes."""
-    now = dt.datetime.now(dt.UTC)
-    async with sessions() as db:
-        stale = (await db.scalars(select(Project).where(Project.paused_at.is_(None)).where(
-            (Project.freshness_checked_at.is_(None)) | (Project.freshness_checked_at < now - dt.timedelta(days=1)))
-            .limit(20))).all()
-        for project in stale:
-            project.freshness_checked_at = now
-            await check_project(db, project, client, settings, now)
-            await db.commit()
+        package = kept[fact_key(dep)]
+        if stale(package.latest_checked_at, LATEST_TTL, now):
+            newest = await newest_version(client, package)
+            if newest:
+                package.latest, package.latest_checked_at = newest, now
+        dep.latest = package.latest or dep.latest

@@ -3,10 +3,9 @@
 import datetime as dt
 
 from prodbat_server.dependencies import build
-from prodbat_server.freshness import refresh_freshness
 from prodbat_server.models import Dependency, Incident, Project
 
-from .helpers import NOW, SETTINGS, http_client, page_text, run, view
+from .helpers import NOW, page_text, run_jobs, view
 
 CHECKED = NOW - dt.timedelta(hours=1)
 
@@ -159,11 +158,7 @@ def test_end_of_life_and_end_of_life_soon_come_from_the_daily_lookup(client, db,
     client.put("/api/dependencies", headers=key, json={"packages": [
         {"ecosystem": "PyPI", "name": "django", "version": "4.2.11", "direct": True}]})
 
-    async def go(sessions):
-        async with http_client(site) as http:
-            await refresh_freshness(sessions, http, SETTINGS)
-
-    run(go, db)
+    run_jobs(db, site)
     found = {r["name"]: r for g in client.get("/api/dependencies", headers=key).json()["groups"] for r in g["rows"]}
     assert found["node"]["status"] == "eol"
     assert found["node"]["notes"][0].startswith("Support ended on 30 Apr 2026")

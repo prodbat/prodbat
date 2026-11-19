@@ -585,6 +585,43 @@ class Dependency(Base):
     facts_checked_at: Mapped[dt.datetime | None] = timestamp()
 
 
+class PackageFacts(Base):
+    """What the public registries say about one version of a package,
+    shared by every site that uses it, so it is asked about once. Each
+    group of facts has its own time it was last asked (facts.py says how
+    long each one is good for)."""
+
+    __tablename__ = "package_facts"
+    __table_args__ = (UniqueConstraint("ecosystem", "name", "version"),)
+
+    id: Mapped[int] = pk()
+    ecosystem: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    version: Mapped[str] = mapped_column(Text)
+    # From OSV. Serious: rated high or critical with a fix, as
+    # [{"id", "summary", "fixed"}]. Issues: the rest, as sentences.
+    serious: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    issues: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    advisories_checked_at: Mapped[dt.datetime | None] = timestamp()
+    # From deps.dev: the newest release of the package.
+    latest: Mapped[str | None] = mapped_column(Text)
+    latest_checked_at: Mapped[dt.datetime | None] = timestamp()
+    # From deps.dev: what its authors say if they deprecated this version.
+    deprecated: Mapped[str | None] = mapped_column(Text)
+    deprecated_checked_at: Mapped[dt.datetime | None] = timestamp()
+
+
+class EolFacts(Base):
+    """A product's release lines from endoflife.date (or Node.js's own
+    list of releases), shared by every site that runs it."""
+
+    __tablename__ = "eol_facts"
+
+    product: Mapped[str] = mapped_column(Text, primary_key=True)
+    data: Mapped[list] = mapped_column(JSON)
+    checked_at: Mapped[dt.datetime] = timestamp()
+
+
 class QueueReport(Base):
     """A snapshot of one job queue, sent by the site's own server about
     once a minute."""
@@ -618,3 +655,36 @@ class LogLine(Base):
     level: Mapped[str] = mapped_column(Text)  # debug, info, warning, error
     message: Mapped[str] = mapped_column(Text)
     fields: Mapped[dict | None] = mapped_column(JSON)
+
+
+class QueuedJob(Base):
+    """Work for the worker to do soon, such as checking a project's
+    packages after the list changes. (The `jobs` table is the site's own
+    scheduled jobs.)"""
+
+    __tablename__ = "job_queue"
+    __table_args__ = (
+        # One waiting job per kind and key: enqueueing it again is a no-op. A
+        # job that has started no longer counts, so a change that arrives
+        # while it runs gets a run of its own.
+        Index("ux_job_queue_waiting", "kind", "key", unique=True,
+              postgresql_where=text("finished_at is null and locked_at is null")),
+        Index("ix_job_queue_due", "run_after", postgresql_where=text("finished_at is null")),
+    )
+
+    id: Mapped[int] = pk()
+    kind: Mapped[str] = mapped_column(Text)
+    # What the job is about, to tell two jobs of a kind apart: the
+    # project's id for a project's jobs.
+    key: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # Null for jobs that are not about one project.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    run_after: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    # Set while a worker runs it. A lock older than the timeout means that worker died.
+    locked_at: Mapped[dt.datetime | None] = timestamp()
+    created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    # Set when it succeeds or is given up on; `failed` says which.
+    finished_at: Mapped[dt.datetime | None] = timestamp()
+    failed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

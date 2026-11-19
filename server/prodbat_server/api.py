@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .checks import certificate_expiry, check_site, domain_expiry
 from . import security
 from .config import Settings
-from . import dependencies, github, push, setup, slack, telegram, webhooks
+from . import dependencies, github, push, queue, setup, slack, telegram, webhooks
 from .flows import SAY, discover_pages
 from .incidents import queue_email
 from .models import (Attribution, Dependency, Job, LogLine, Payment, Pageview, Project, QueueReport, ServerError, hash_secret,
@@ -536,7 +536,9 @@ async def put_dependencies(request: Request, body: Packages) -> dict:
             await db.execute(pg_insert(Dependency).on_conflict_do_nothing(), [
                 {"project_id": project.id, "ecosystem": eco, "name": name, "version": p.version,
                  "direct": p.direct or eco == "runtime"} for (eco, name), p in unique.items()])
-        project.advisories_checked_at = project.freshness_checked_at = None  # look them up on the worker's next pass
+        # Not checked yet: the page says "Being looked up" until the job has run.
+        project.advisories_checked_at = project.freshness_checked_at = None
+        await queue.enqueue(db, "check_packages", project.id)
         project.dependencies_sent_at = dt.datetime.now(dt.UTC)
         await db.commit()
     return {"ok": True, "packages": len(body.packages)}
@@ -676,9 +678,11 @@ async def put_runtime(request: Request, body: Runtime) -> dict:
             db.add(Dependency(project_id=project.id, ecosystem="runtime", name=body.language, version=body.version,
                               direct=True))
             project.freshness_checked_at = None
+            await queue.enqueue(db, "check_packages", project.id)
         elif current.version != body.version:
             current.version = body.version
             project.freshness_checked_at = None
+            await queue.enqueue(db, "check_packages", project.id)
         await db.commit()
     return {"ok": True}
 

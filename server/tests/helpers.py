@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from prodbat_server import queue
 from prodbat_server.checks import run_due_checks
 from prodbat_server.config import Settings
 from prodbat_server.detect import evaluate_all
@@ -36,10 +37,13 @@ class Site:
         # (status, body, headers). Everything else gets the usual answer.
         self.pages = {}
         self.asked = []  # every address requested of the site itself
+        self.lookups = []  # every request to OSV, deps.dev, endoflife.date and nodejs.org
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.host == "rdap.org":
             return httpx.Response(200, json=self.rdap)
+        if request.url.host in ("api.osv.dev", "endoflife.date", "api.deps.dev", "nodejs.org"):
+            self.lookups.append(f"{request.url.host}{request.url.path}")
         if request.url.host == "api.osv.dev":
             return httpx.Response(200, json=self.osv[request.url.path])
         if request.url.host in ("endoflife.date", "api.deps.dev", "nodejs.org"):
@@ -78,6 +82,16 @@ def run(fn, db=None):
     if db is not None:
         db.expire_all()
     return result
+
+
+def run_jobs(db, site):
+    """The worker's job queue: the daily package checks that are due, then every job that is due."""
+    async def go(sessions):
+        async with http_client(site) as client:
+            await queue.enqueue_due_checks(sessions)
+            return await queue.run_due(sessions, client, SETTINGS)
+
+    return run(go, db)
 
 
 def evaluate(db):

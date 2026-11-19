@@ -31,7 +31,7 @@ from .config import Settings
 from .detect import evaluate_project
 from .flows import SAY
 from .incidents import resolve
-from . import setup
+from . import queue, setup
 from .models import Dependency, Incident, Project
 from .suggestions import BY_ID, applicable, render
 from .summary import evidence_for
@@ -367,6 +367,7 @@ async def _check_task(db: AsyncSession, project: Project, settings: Settings, ht
             if gone:
                 resolve(db, project, incident, settings, now)
                 project.advisories_checked_at = project.freshness_checked_at = None  # look at the new version too
+                await queue.enqueue(db, "check_packages", project.id)
         elif incident.kind in ("eol", "runtime"):
             name = "node" if incident.kind == "runtime" else d.get("package")
             dep = await db.scalar(select(Dependency).where(
@@ -374,9 +375,10 @@ async def _check_task(db: AsyncSession, project: Project, settings: Settings, ht
                 Dependency.ecosystem == ("runtime" if incident.kind == "runtime" else d.get("ecosystem"))))
             if dep is not None and dep.version != d.get("version"):
                 project.freshness_checked_at = None
+                await queue.enqueue(db, "check_packages", project.id)
                 await db.commit()
                 return answer(None, f"Prodbat now sees version {version_value(dep.version)}. It checks that version's "
-                                    f"support within 15 minutes; run `npx prodbat done {tid}` again then.")
+                                    f"support within a minute; run `npx prodbat done {tid}` again then.")
         else:
             await evaluate_project(db, project, settings, now)
         await db.commit()

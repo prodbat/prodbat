@@ -2,21 +2,15 @@
 {% block title %}Packages{% endblock %}
 {% block main %}
 <div class="bar">
-<h1>Packages <span class="muted">{{ with_problems }} of {{ total }} need attention</span></h1>
-<span class="ranges"><a href="?show=problems"{% if show == 'problems' %} aria-current="true"{% endif %}>Need attention</a><a href="?show=all"{% if show != 'problems' %} aria-current="true"{% endif %}>All</a></span>
+<h1>Packages {% if deps.total %}<span class="muted">{{ deps.problems }} of {{ "{:,}".format(deps.total) }} {{ 'needs' if deps.problems == 1 else 'need' }} a look</span>{% endif %}</h1>
+{% if deps.total %}<span class="ranges"><a href="?show=all"{% if show != 'problems' %} aria-current="true"{% endif %}>All</a><a href="?show=problems"{% if show == 'problems' %} aria-current="true"{% endif %}>Need a look</a></span>{% endif %}
 </div>
-<section class="card scroll">
-{% if packages %}
-<table>
-<thead><tr><th>Package</th><th>Ecosystem</th><th>Version</th><th>Newest</th><th>Problems</th></tr></thead>
-<tbody>{% for p in packages %}<tr>
-<td class="mono">{{ p.name }}{% if not p.direct %} <span class="tag">indirect</span>{% endif %}</td>
-<td>{{ p.ecosystem }}</td>
-<td class="mono">{{ p.version }}</td>
-<td class="mono">{% if p.behind %}{{ p.latest }}{% else %}<span class="muted">{{ p.latest or '–' }}</span>{% endif %}</td>
-<td class="clip">{% for problem in p.problems %}<div>{{ problem }}</div>{% else %}<span class="muted">None known</span>{% endfor %}</td>
-</tr>{% endfor %}</tbody>
-</table>
-{% else %}<p class="empty">{% if total %}No known problems in {{ total }} packages.{% else %}No packages reported yet: <span class="mono">npx prodbat deps</span>.{% endif %}</p>{% endif %}
+<section class="card">
+{% if not deps.total %}
+<p class="empty">No package list yet. Your coding agent sends it with <span class="mono">npx prodbat deps</span>, and every package is then checked each day for security problems and end of support.</p>
+{% else %}
+<p class="muted" style="margin: 0">{% if deps.sent %}The list was last sent on {{ deps.sent }}. {% endif %}Your coding agent sends it again with <span class="mono">npx prodbat deps</span>.</p>
+{% if deps.groups %}{% include "_deps_table.html" %}{% else %}<p class="empty">No known problems in {{ "{:,}".format(deps.total) }} packages.</p>{% endif %}
+{% endif %}
 </section>
 {% endblock %}

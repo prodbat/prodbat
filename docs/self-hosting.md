@@ -1,6 +1,6 @@
 # Running Prodbat yourself
 
-Prodbat is one container and a Postgres database. The container runs the web server and the worker (outside checks, problem detection, email) together.
+Prodbat is one container and a Postgres database. The container runs the web server and the worker (outside checks, package checks, problem detection, email) together.
 
 ## With Docker
 
@@ -27,6 +27,10 @@ uv run python -m prodbat_server run          # creates the tables, then serves o
 ```
 
 `run` is `migrate`, `serve` and `worker` in one process. They can also be run separately; several workers can run at once.
+
+Some work is queued in the `job_queue` table rather than done on a timer, such as checking a site's packages when its list is sent and again once a day. The worker hears about new jobs through Postgres `LISTEN`/`NOTIFY` and starts them within a second or two. A job that fails is tried again after 1 minute, 10 minutes and an hour, then given up; `last_error` says why. If the worker can't listen, it looks for jobs every 5 seconds instead. A connection pooler in transaction mode lets it listen but never passes the notifications on, so new jobs wait up to 30 seconds; point `PRODBAT_DATABASE_URL` at Postgres directly or at a pooler in session mode.
+
+What OSV, deps.dev and endoflife.date say about a package version or release line is kept in `package_facts` and `eol_facts` and shared by every site, so a version many sites use is asked about once. Security problems and newest versions are asked again after a day, deprecations and end of life dates after a week.
 
 ## Settings
 
