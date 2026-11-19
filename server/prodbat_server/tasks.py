@@ -31,6 +31,7 @@ from .config import Settings
 from .detect import evaluate_project
 from .flows import SAY
 from .incidents import resolve
+from . import setup
 from .models import Dependency, Incident, Project
 from .suggestions import BY_ID, applicable, render
 from .summary import evidence_for
@@ -238,11 +239,15 @@ async def list_tasks(db: AsyncSession, project: Project, settings: Settings) -> 
     tasks = [task for incident in await db.scalars(select(Incident).where(
         Incident.project_id == project.id, Incident.ended_at.is_(None)).order_by(Incident.started_at))
         if (task := from_incident(incident)) is not None]
-    for index, suggestion in enumerate(await applicable(db, project)):
-        if suggestion["id"] == "S-04":
-            continue  # serving the script from the site's own domain is optional polish, not work to hand out
+    # Things to set up, in the setup checklist's order. Serving the script from the site's own domain
+    # (S-04) is optional polish, not work to hand out. Items the agent skipped as not applying, or has
+    # finished and are waiting for their first data, are not handed out again.
+    left_out = set(project.setup_skipped or []) | setup.waiting_ids(project, dt.datetime.now(dt.UTC))
+    found = {s["id"]: s for s in await applicable(db, project)}
+    for index, sid in enumerate(sid for sid in setup.ORDER if sid in found and sid not in left_out):
+        suggestion = found[sid]
         rendered = render(suggestion, project, settings.base)
-        tasks.append(Task(suggestion["id"], 10 + index, suggestion["title"], suggestion["pitch"],
+        tasks.append(Task(sid, 10 + index, suggestion["title"], suggestion["pitch"],
                           [rendered["instructions"]], "Prodbat calls this done when it starts receiving that data."))
     return sorted(tasks, key=lambda t: t.priority)
 
@@ -327,10 +332,20 @@ async def _check_task(db: AsyncSession, project: Project, settings: Settings, ht
         suggestion = BY_ID.get(tid.upper())
         if suggestion is None:
             raise HTTPException(404, f"There is no task {tid}.")
+        sid = tid.upper()
         if await db.scalar(text(suggestion["applies"]), {"p": project.id}):
-            return answer(None, f"Not yet: Prodbat has not received that data. It arrives once the change is deployed "
-                                f"and used. Run `npx prodbat done {tid.upper()}` again after that.")
-        return answer(True, f"Done: Prodbat is receiving it. Run `npx prodbat next` for what is left.")
+            # The agent says it has finished: setup moves on while the data is on its way.
+            await setup.mark_waiting(db, project, sid, now)
+            await db.commit()
+            sentence = (f"Not yet: Prodbat has not received that data. It arrives once the change is deployed and "
+                        f"used. Run `npx prodbat done {sid}` again after that.")
+            items = await setup.checklist(db, project, now)
+            if any(item.id == sid and item.state == "waiting" for item in items):
+                sentence += f"\nSetup counts {sid} as finished and waiting for its data.\n{setup.pointer(items)}"
+            return answer(None, sentence)
+        if sid in setup.ORDER:
+            return answer(True, f"Done: Prodbat is receiving it.\n{setup.pointer(await setup.checklist(db, project, now))}")
+        return answer(True, "Done: Prodbat is receiving it. Run `npx prodbat next` for what is left.")
 
     incident = await db.get(Incident, int(tid[1:])) if re.fullmatch(r"[Tt]\d{1,15}", tid) else None
     if incident is None or incident.project_id != project.id:

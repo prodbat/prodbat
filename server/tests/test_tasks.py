@@ -21,18 +21,22 @@ def split(text):
 
 def test_with_nothing_wrong_the_next_task_is_something_worth_setting_up(client, project, key):
     listing = client.get("/api/tasks", headers=key).json()
-    assert [t["id"] for t in listing["tasks"]] == ["S-01", "S-02", "S-03", "S-05", "S-06", "S-07"]
+    assert [t["id"] for t in listing["tasks"]] == ["S-03", "S-05", "S-07", "S-01", "S-02", "S-06"]  # the setup order
     first = client.get("/api/tasks/next", headers=key).json()
-    assert first["task"]["id"] == "S-01"
-    assert first["text"].startswith("# Task S-01: Count payments by product")
-    assert "When you have finished, run `npx prodbat done S-01`." in first["text"]
+    assert first["task"]["id"] == "S-03"
+    assert first["text"].startswith("# Task S-03: Report every server error with its cause")
+    assert "When you have finished, run `npx prodbat done S-03`." in first["text"]
     assert "5 more after this one" in first["text"]
 
-    # Prodbat says "not yet" until the data arrives, then "done", and the task leaves the list.
-    assert client.post("/api/tasks/S-01/check", headers=key).json()["fixed"] is None
+    # Prodbat says "not yet" until the data arrives, then "done". Once the agent has said it is finished,
+    # the task is not handed out again while the data is on its way.
+    not_yet = client.post("/api/tasks/S-01/check", headers=key).json()
+    assert not_yet["fixed"] is None and "Setup counts S-01 as finished and waiting for its data." in not_yet["text"]
+    assert "S-01" not in [t["id"] for t in client.get("/api/tasks", headers=key).json()["tasks"]]
     client.post("/api/stripe", json=invoice(), headers=key)
     assert client.post("/api/tasks/s-01/check", headers=key).json()["fixed"] is True
-    assert client.get("/api/tasks/next", headers=key).json()["task"]["id"] == "S-02"
+    # Forwarding Stripe events comes from the app's server, so it has reported in.
+    assert client.get("/api/tasks/next", headers=key).json()["task"]["id"] == "S-05"
 
 
 def test_a_broken_checkout_comes_first_with_steps_and_fenced_evidence(client, db, project, key):
@@ -43,7 +47,7 @@ def test_a_broken_checkout_comes_first_with_steps_and_fenced_evidence(client, db
     evaluate(db)
     order = [t["title"] for t in client.get("/api/tasks", headers=key).json()["tasks"]]
     assert order[:2] == ["People cannot pay. Fix POST /api/checkout", "Upgrade x from 1.0.0 to 1.0.1 or later"]
-    assert order[2] == "Count payments by product"  # things to set up come after things that are wrong
+    assert order[2] == "Report every server error with its cause"  # things to set up come after things that are wrong
 
     text = client.get("/api/tasks/next", headers=key).json()["text"]
     told, evidence = split(text)
@@ -126,7 +130,7 @@ def test_an_upgrade_task_is_checked_against_the_package_list(client, db, project
     client.put("/api/dependencies", headers=key, json={"packages": [{"ecosystem": "npm", "name": "lodash", "version": "4.17.21"}]})
     assert client.post(f"/api/tasks/{tid}/check", headers=key).json()["fixed"] is True
     assert db.scalars(select(Incident)).one().ended_at is not None
-    assert client.get("/api/tasks/next", headers=key).json()["task"]["id"] == "S-01"
+    assert client.get("/api/tasks/next", headers=key).json()["task"]["id"] == "S-03"
 
 
 def test_checking_a_site_down_task_loads_the_site_again_there_and_then(client, db, project, key, site):

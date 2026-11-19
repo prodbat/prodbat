@@ -285,7 +285,7 @@ def test_mcp_lists_six_tools_and_runs_them_with_the_projects_key(client, db, pro
     assert rpc(client, "initialize")["result"]["serverInfo"]["name"] == "prodbat"
     assert client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}).status_code == 202
     tools = rpc(client, "tools/list")["result"]["tools"]
-    assert len(tools) == 10 and all(t["inputSchema"]["type"] == "object" for t in tools)
+    assert len(tools) == 12 and all(t["inputSchema"]["type"] == "object" for t in tools)
 
     status = rpc(client, "tools/call", {"name": "prodbat_status"}, key)["result"]
     assert status["content"][0]["text"].startswith("# yourapp.com: Waiting for your first visitor.")

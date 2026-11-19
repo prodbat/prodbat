@@ -88,6 +88,11 @@ class Project(Base):
     # own server: what the page's setup checklist ticks off.
     first_data_at: Mapped[dt.datetime | None] = timestamp()
     first_server_at: Mapped[dt.datetime | None] = timestamp()
+    # The agent's setup checklist (setup.py): suggestion ids the agent said do
+    # not apply to this app, and items it has finished that wait for their
+    # first data, as {id: when it said so}.
+    setup_skipped: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    setup_waiting: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     # One-off emails, so each goes once.
     live_email_at: Mapped[dt.datetime | None] = timestamp()
     nudge_email_at: Mapped[dt.datetime | None] = timestamp()

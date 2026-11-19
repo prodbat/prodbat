@@ -16,14 +16,14 @@ This repository is the open-source product. It is early: it runs and is tested l
 - **Logs**: send log lines from your app, search them, and see what was logged around each problem.
 - **Email**: "Broken:" at once, "Needs a look:", "Working again:" in the same thread, and a short report every Monday.
 - **Slack, Telegram, phone and texts**: the same alerts in a Slack channel or a Telegram chat, one message per problem with "Working again" replying to it; as notifications on your phone or computer, with no app to install (on an iPhone, add the page to the Home Screen first); a text message when customers are affected.
-- **For coding agents**: a command line (`npx prodbat`), an MCP endpoint (`POST /mcp`; `init` writes `.mcp.json` for Claude Code and `.cursor/mcp.json` for Cursor), a skill, and `llms.txt`. The one-prompt setup on the homepage uses hosted Prodbat: `npx prodbat init --email <address>` emails that address a link to activate the dashboard.
+- **For coding agents**: a command line (`npx prodbat`), an MCP endpoint (`POST /mcp`; `init` writes `.mcp.json` for Claude Code and `.cursor/mcp.json` for Cursor), a skill, and `llms.txt`. The one-prompt setup on the homepage uses hosted Prodbat: `npx prodbat init --email <address>` emails that address a link to activate the dashboard, and `npx prodbat setup` then walks the agent through the rest (server errors, packages, logs, payments, jobs, queues) until setup is complete.
 
 ## Layout
 
 | Path | What it is | Licence |
 |---|---|---|
 | `server/` | The server: FastAPI and Postgres. See `server/README.md` | AGPL-3.0 |
-| `packages/js/` | `npx prodbat` (check, init, verify, status, logs, suggestions, deps) and the library for Node, Deno, Supabase Edge Functions and Cloudflare Workers | MIT |
+| `packages/js/` | `npx prodbat` (check, init, verify, setup, skip, next, done, status, logs, suggestions, deps) and the library for Node, Deno, Supabase Edge Functions and Cloudflare Workers | MIT |
 | `packages/python/` | `pip install prodbat`: the library for Python servers | MIT |
 | `packages/ruby/` | `gem "prodbat"`: Rails (automatic), any Rack app, Sidekiq | MIT |
 | `packages/php/` | `composer require prodbat/prodbat`: Laravel (automatic) and plain PHP | MIT |

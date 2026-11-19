@@ -77,7 +77,10 @@ if it goes one and a half times its usual gap without checking in, the owner is 
         "id": "S-03",
         "title": "Report every server error with its cause",
         "pitch": "We could also catch every 500 your server returns, with the file and line that caused it.",
-        "applies": "select not exists (select 1 from server_errors where project_id = :p)",
+        # Done once the server has reported in: the libraries send the language version
+        # at start-up, so a healthy server counts without waiting for its first error.
+        "applies": "select not exists (select 1 from server_errors where project_id = :p) "
+                   "and not exists (select 1 from projects where id = :p and first_server_at is not null)",
         "steps": """\
 The browser script only sees failures a visitor's browser hits. A few lines in the server report every
 unhandled error with its file and line, and every other 5xx answer, including webhooks and jobs.

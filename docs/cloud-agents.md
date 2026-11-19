@@ -139,7 +139,7 @@ Each agent below can work from the issue alone. It works better with Prodbat's M
 
 - URL: `https://prodbat.com/mcp` (on your own server, `<PRODBAT_PUBLIC_URL>/mcp`)
 - Header: `Authorization: Bearer <PRODBAT_KEY>`, the project's secret key, the same one your app's server uses
-- Tools: `prodbat_next_task`, `prodbat_tasks`, `prodbat_task`, `prodbat_check_task`, and more
+- Tools: `prodbat_next_task`, `prodbat_tasks`, `prodbat_task`, `prodbat_check_task`, `prodbat_setup`, and more
 
 Store `PRODBAT_KEY` as a secret in the agent's own environment, never in the repository. To confirm a fix without MCP, the agent (or your deploy pipeline) runs `npx prodbat done <task id>` with `PRODBAT_KEY` in its environment.
 

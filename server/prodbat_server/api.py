@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .checks import certificate_expiry, check_site, domain_expiry
 from . import security
 from .config import Settings
-from . import github, push, slack, telegram, webhooks
+from . import github, push, setup, slack, telegram, webhooks
 from .flows import SAY, discover_pages
 from .incidents import queue_email
 from .models import (Attribution, Dependency, Job, LogLine, Payment, Pageview, Project, QueueReport, ServerError, hash_secret,
@@ -258,8 +258,18 @@ async def verify(db, project: Project, settings: Settings, http) -> dict:
     lines = [f"{mark[passed]} {name}. {detail}" for passed, name, detail in checks]
     lines += ["", f"Prodbat is watching {project.domain}. The owner's page: {settings.base}/d/{project.page_token}"
               if ok else "Not working yet. Fix the FAIL lines above and run verify again."]
-    return {"ok": ok, "checks": [{"ok": passed, "name": name, "detail": detail} for passed, name, detail in checks],
-            "text": "\n".join(lines) + "\n"}
+    result = {"ok": ok, "checks": [{"ok": passed, "name": name, "detail": detail} for passed, name, detail in checks]}
+    if ok:
+        if tag_found and project.first_data_at is None:
+            # The tag is live; the setup checklist only waits for a first visit now.
+            await setup.mark_waiting(db, project, setup.SCRIPT, now)
+            await db.commit()
+        items = await setup.checklist(db, project, now)
+        result["setup_complete"] = setup.complete(items)
+        if not result["setup_complete"]:
+            lines += ["", f"Setup is not finished: {setup.progress(items).removeprefix('Setup: ')} Run `npx prodbat setup` and work through "
+                          "it until it says setup is complete."]
+    return {**result, "text": "\n".join(lines) + "\n"}
 
 
 @router.post("/verify")
@@ -771,6 +781,26 @@ async def get_logs(request: Request, q: str | None = None, level: str | None = N
     text = "\n".join(format_line(line) for line in lines) or f"No matching log lines in the last {since}."
     return {"lines": [{"ts": line.ts.isoformat(), "level": line.level, "message": line.message, "fields": line.fields}
                       for line in lines], "text": text + "\n"}
+
+
+# ---- the setup checklist -------------------------------------------------
+
+@router.get("/setup")
+async def get_setup(request: Request) -> dict:
+    async with request.app.state.sessions() as db:
+        return await setup.setup(db, await project_for(request, db), request.app.state.settings)
+
+
+@router.post("/setup/{sid}/skip")
+async def post_setup_skip(request: Request, sid: str) -> dict:
+    async with request.app.state.sessions() as db:
+        return await setup.skip(db, await project_for(request, db), request.app.state.settings, sid)
+
+
+@router.delete("/setup/{sid}/skip")
+async def delete_setup_skip(request: Request, sid: str) -> dict:
+    async with request.app.state.sessions() as db:
+        return await setup.unskip(db, await project_for(request, db), request.app.state.settings, sid)
 
 
 # ---- tasks for the coding agent -------------------------------------------

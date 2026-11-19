@@ -1,6 +1,6 @@
 {
   "name": "prodbat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Prodbat: the command line (npx prodbat) and the library for servers and edge functions (errors, logs, job queues, Stripe events). Node, Bun, Deno, Supabase Edge Functions, Cloudflare Workers.",
   "license": "MIT",
   "type": "module",
@@ -10,6 +10,7 @@
   "files": [
     "bin",
     "lib",
+    "skill",
     "README.md"
   ],
   "homepage": "https://prodbat.com",
