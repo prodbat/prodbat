@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from . import github, push, slack, telegram, webhooks
+from . import dependencies, github, push, slack, telegram, webhooks
 from .api import queue_test_alert, script_tag, test_destinations
 from .incidents import agent_prompt, resolve
 from .models import Email, Incident, Mute, Project, PushSubscription, SiteCheck, hash_secret, new_secret
@@ -69,6 +69,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         emailed = await db.scalar(select(Email.id).where(Email.project_id == project.id).limit(1)) is not None
         checks = await db.scalar(select(func.count()).select_from(SiteCheck)
                                  .where(SiteCheck.project_id == project.id)) or 0
+        deps = await dependencies.table(db, project)
     notice = {"test": f"A test alert is on its way to {places}.",
               "muted": "Done. We will not tell you about that again.",
               "smscode": "We texted you a code. Enter it below to turn texts on.",
@@ -101,7 +102,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         "page": summary, "token": token, "script_tag": script_tag(settings, project), "broken": broken,
         "prompt": prompt, "alert_email": project.alert_email, "notice": notice, "setup": setup,
         "unfinished": [s for s in setup if not s["done"] and s.get("later")],
-        "paused": project.paused_at is not None, "checks": checks,
+        "paused": project.paused_at is not None, "checks": checks, "deps": deps,
         "since": f"{project.created_at:%-d %b}", "stalled": stalled(project),
         "texts": can_text(project, settings), "text_where": text_where(settings) if settings.text_prefixes else None, "sms_to": project.sms_to, "sms_pending": project.sms_pending,
         "needs_timezone": not project.timezone,

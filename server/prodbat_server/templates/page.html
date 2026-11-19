@@ -78,6 +78,30 @@ code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.9em;
 #texts input, #webhook input[type=url], #github input:not([type]), #github select { font: inherit; min-height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid #B9BEB3; background: #FFF; min-width: min(260px, 100%); }
 #github input:not([type]) { width: min(520px, 100%); margin-top: 6px; }
 #github label { display: block; }
+.deps-box { overflow-x: auto; margin: 0 -2px; }
+table.deps { width: 100%; border-collapse: collapse; font-size: 15px; }
+.deps th, .deps td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-top: 1px solid var(--soft-line); }
+.deps thead th { border-top: 0; padding-top: 0; color: var(--muted); font-size: 14px; font-weight: 500; }
+.deps tr.group th { padding-top: 18px; font-size: 14px; font-weight: 600; border-top: 0; }
+.deps td.name { min-width: 0; overflow-wrap: anywhere; }
+.deps td.name .muted { margin-top: 2px; }
+.deps td.ver { white-space: nowrap; }
+.deps tr.more td { color: var(--muted); font-size: 14px; }
+.eco { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 12px; line-height: 18px; vertical-align: 1px; }
+.pill { display: inline-block; white-space: nowrap; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.pill-broken { background: var(--red-tint); color: var(--red); }
+.pill-look { background: #FFF4DB; color: var(--amber); }
+.pill-muted { background: var(--soft-line); color: var(--muted); }
+.pill-working { background: var(--green-tint); color: var(--green); }
+@media (max-width: 640px) {
+  .deps thead { display: none; }
+  .deps, .deps tbody, .deps tr, .deps td, .deps th { display: block; }
+  .deps tr:not(.group):not(.more) { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; padding: 10px 0; border-top: 1px solid var(--soft-line); }
+  .deps td { border: 0; padding: 0; }
+  .deps td.name { flex: 1 0 100%; }
+  .deps td.ver::before { content: attr(data-label) " "; color: var(--muted); font-family: Inter, system-ui, sans-serif; font-size: 13px; }
+  .deps tr.more td { padding: 10px 0; border-top: 1px solid var(--soft-line); }
+}
 footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
 </style>
 </head>
@@ -230,6 +254,25 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 </div>
 </section>
 {% endif %}
+
+<section class="card list" id="dependencies">
+<div class="list-head"><h2>Dependencies</h2>{% if deps.total %}<span class="muted">{{ "{:,}".format(deps.total) }} {{ 'package' if deps.total == 1 else 'packages' }}</span>{% endif %}</div>
+{% if not deps.total %}
+<p class="empty">No package list yet. Your coding agent sends it with <span class="mono">npx prodbat deps</span>, and every package is then checked each day for security problems and end of support.</p>
+{% else %}
+<p class="muted">{% if deps.sent %}The list was last sent on {{ deps.sent }}. {% endif %}{% if deps.problems %}{{ deps.problems }} {{ 'needs' if deps.problems == 1 else 'need' }} a look.{% else %}Nothing known against them.{% endif %} Your coding agent sends it again with <span class="mono">npx prodbat deps</span>.</p>
+<div class="deps-box">
+<table class="deps">
+<thead><tr><th scope="col">Name</th><th scope="col">Current</th><th scope="col">Latest</th><th scope="col">Status</th></tr></thead>
+{% for group in deps.groups %}<tbody>
+<tr class="group"><th colspan="4" scope="colgroup">{{ group.title }}</th></tr>
+{% for r in group.rows %}<tr><td class="name"><span class="mono">{{ r.display }}</span><span class="eco">{{ r.label }}</span>{% for note in r.notes %}<div class="muted">{{ note }}</div>{% endfor %}</td><td class="ver mono" data-label="Current">{{ r.current }}</td><td class="ver mono" data-label="Latest">{{ r.latest or '–' }}</td><td><span class="pill pill-{{ r.pill }}">{{ r.status_label }}</span></td></tr>
+{% endfor %}{% if group.level == 'indirect' and deps.hidden_note %}<tr class="more"><td colspan="4">{{ deps.hidden_note }}</td></tr>
+{% endif %}</tbody>
+{% endfor %}</table>
+</div>
+{% endif %}
+</section>
 
 {% if page.happened or page.coming_up or page.suggestion %}
 <section class="lists">

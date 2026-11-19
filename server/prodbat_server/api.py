@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .checks import certificate_expiry, check_site, domain_expiry
 from . import security
 from .config import Settings
-from . import github, push, setup, slack, telegram, webhooks
+from . import dependencies, github, push, setup, slack, telegram, webhooks
 from .flows import SAY, discover_pages
 from .incidents import queue_email
 from .models import (Attribution, Dependency, Job, LogLine, Payment, Pageview, Project, QueueReport, ServerError, hash_secret,
@@ -182,6 +182,9 @@ async def status(db, project: Project, settings: Settings) -> dict:
         lines.append("Last 7 days: " + ", ".join(f"{n.label.lower()} {n.value}" for n in s.numbers if n.value != "–"))
     if s.package_notes:
         lines += ["", "Versions (listed, not alerted):", *[f"- {note}" for note in s.package_notes]]
+    deps = await dependencies.table(db, project)
+    if table_lines := dependencies.as_text(deps):
+        lines += ["", f"Dependencies with a problem ({deps['problems']} of {deps['total']}):", *table_lines]
     jobs = (await db.scalars(select(Job).where(Job.project_id == project.id).order_by(Job.name))).all()
     now = dt.datetime.now(dt.UTC)
     for job in jobs:
@@ -197,6 +200,7 @@ async def status(db, project: Project, settings: Settings) -> dict:
                      for p in s.problems],
         "numbers": {n.label: n.value for n in s.numbers},
         "suggestion": s.suggestion,
+        "dependencies": dependencies.as_json(deps),
         "text": "\n".join(lines).strip() + "\n",
     }
 
@@ -533,8 +537,17 @@ async def put_dependencies(request: Request, body: Packages) -> dict:
                 {"project_id": project.id, "ecosystem": eco, "name": name, "version": p.version,
                  "direct": p.direct or eco == "runtime"} for (eco, name), p in unique.items()])
         project.advisories_checked_at = project.freshness_checked_at = None  # look them up on the worker's next pass
+        project.dependencies_sent_at = dt.datetime.now(dt.UTC)
         await db.commit()
     return {"ok": True, "packages": len(body.packages)}
+
+
+@router.get("/dependencies")
+async def get_dependencies(request: Request) -> dict:
+    """The dependencies table on the page: the language, the packages the app
+    names, and the ones pulled in by others that have a problem."""
+    async with request.app.state.sessions() as db:
+        return dependencies.as_json(await dependencies.table(db, await project_for(request, db)))
 
 
 # ---- suggestions and the test alert -------------------------------------

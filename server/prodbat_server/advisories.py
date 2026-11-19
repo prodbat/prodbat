@@ -172,7 +172,7 @@ async def refresh_advisories(sessions, client: httpx.AsyncClient, settings: Sett
                          f"else breaks, and deploy.",
                     started_at=now, gather=new,
                     data={"ecosystem": dep.ecosystem, "name": dep.name, "version": dep.version, "to": fix,
-                          "direct": dep.direct})
+                          "direct": dep.direct, "count": len(found)})
             digest(db, project, new, settings, "security problems in your packages")
             for incident in await db.scalars(select(Incident).where(
                     Incident.project_id == project.id, Incident.kind == "advisory", Incident.ended_at.is_(None))):

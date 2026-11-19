@@ -70,6 +70,8 @@ class Project(Base):
     advisories_checked_at: Mapped[dt.datetime | None] = timestamp()
     weekly_sent_at: Mapped[dt.datetime | None] = timestamp()
     freshness_checked_at: Mapped[dt.datetime | None] = timestamp()
+    # When `npx prodbat deps` last sent the package list.
+    dependencies_sent_at: Mapped[dt.datetime | None] = timestamp()
     # Routes the owner has named as part of paying, signing in or signing
     # up, on top of the ones recognised by name: {"pay": ["/api/buy"]}.
     flows: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")

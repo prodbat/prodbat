@@ -216,16 +216,16 @@ async def check_project(db, project: Project, client: httpx.AsyncClient, setting
         move_to = supported_cycle(cycles, today)
         todo = (f"Ask your coding agent to move to {name} {move_to}, run the tests, and deploy."
                 if move_to else "Ask your coding agent which version to move to.")
+        # What the dependencies table on the page shows for this row, too.
+        facts = {"name": name, "version": dep.version, "line": str(cycle["cycle"]), "move_to": move_to,
+                 "ecosystem": dep.ecosystem, "package": dep.name, "ends": ends.isoformat() if ends else None,
+                 "over": is_over(cycle, today)}
         if is_over(cycle, today):
             when = f" on {day(ends)} {ends.year}" if ends else ""
-            facts = {"name": name, "version": dep.version, "line": str(cycle["cycle"]), "move_to": move_to,
-                     "ecosystem": dep.ecosystem, "package": dep.name}
             await say("eol", product, title=f"{line} no longer gets security fixes", todo=todo, data=facts,
                       what=f"Your app runs {name} {dep.version}. Support for {line} ended{when}, so new "
                            f"security problems in it will not be fixed.")
         elif ends and ends - today <= WARN:
-            facts = {"name": name, "version": dep.version, "line": str(cycle["cycle"]), "move_to": move_to,
-                     "ecosystem": dep.ecosystem, "package": dep.name}
             await say("eol", product, todo=todo, data=facts,
                       title=f"{line} stops getting security fixes in {plural((ends - today).days, 'day')}",
                       what=f"Your app runs {name} {dep.version}. Support for {line} ends on {day(ends)} {ends.year}.")
@@ -243,7 +243,7 @@ async def check_project(db, project: Project, client: httpx.AsyncClient, setting
         if newer:
             node.latest = max(newer, key=lambda r: parts(r["version"]))["version"].removeprefix("v")
         if missed:
-            await say("runtime", "node", data={"version": node.version, "to": node.latest},
+            await say("runtime", "node", data={"version": node.version, "to": node.latest, "missed": missed},
                       title=f"Node.js {node.version} is missing {plural(missed, 'security release')}",
                       what=f"Your app runs Node.js {node.version}. {plural(missed, 'release')} since then fixed "
                            f"security problems; the newest Node.js {parts(node.version)[0]} is {node.latest}.",
