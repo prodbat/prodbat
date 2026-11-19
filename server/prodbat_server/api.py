@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from .checks import certificate_expiry, check_site, domain_expiry
 from . import security
 from .config import Settings
-from . import push, slack, telegram
+from . import github, push, slack, telegram, webhooks
 from .flows import SAY, discover_pages
 from .incidents import queue_email
 from .models import (Attribution, Dependency, Job, LogLine, Payment, Pageview, Project, QueueReport, ServerError, hash_secret,
@@ -572,7 +572,9 @@ async def queue_test_alert(db, project: Project, settings: Settings) -> bool:
     posted = slack.post_test(db, project, settings)
     chatted = telegram.post_test(db, project, settings)
     pushed = bool(await push.devices(db, project, settings)) and push.post_test(db, project, settings)
-    return emailed or posted or chatted or pushed
+    hooked = webhooks.post_test(db, project, settings)
+    issued = github.post_test(db, project, settings)  # a test issue, closed straight away
+    return emailed or posted or chatted or pushed or hooked or issued
 
 
 async def test_destinations(db, project: Project, settings: Settings) -> str:
@@ -584,10 +586,15 @@ async def test_destinations(db, project: Project, settings: Settings) -> str:
         places.append(f"{project.telegram_chat} in Telegram")
     if devices := len(await push.devices(db, project, settings)):
         places.append(plural(devices, "device"))
+    if webhooks.can_post(project, settings):
+        places.append("your webhook")
+    if github.can_post(project, settings):
+        places.append(f"{project.github_repo} on GitHub (a test issue, closed straight away)")
     return " and ".join(places) if len(places) < 3 else ", ".join(places[:-1]) + " and " + places[-1]
 
 
-NOWHERE = "No email address, Slack channel, Telegram chat or device is set for this project, so there is nowhere to send it."
+NOWHERE = ("No email address, Slack channel, Telegram chat, device, webhook or GitHub repository is set for this "
+           "project, so there is nowhere to send it.")
 
 
 @router.post("/test-alert")

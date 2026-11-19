@@ -14,10 +14,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from .advisories import refresh_advisories
 from .app import load_extensions
 from .setup_emails import send_setup_emails
+from .github import send_pending_github
 from .push import send_pending_push
 from .slack import send_pending_slack
 from .telegram import register_webhook, send_pending_telegram
 from .texts import send_pending_texts
+from .webhooks import send_pending_webhooks
 from .checks import make_client, refresh_expiry, run_due_checks
 from .config import Settings
 from .detect import evaluate_all
@@ -42,6 +44,9 @@ async def prune(sessions, settings: Settings) -> None:
         await db.execute(text("delete from slack_posts where sent_at < :cutoff"), {"cutoff": cutoff})
         await db.execute(text("delete from push_messages where sent_at < :cutoff"), {"cutoff": cutoff})
         await db.execute(text("delete from telegram_messages where sent_at < :cutoff"), {"cutoff": cutoff})
+        await db.execute(text("delete from github_posts where sent_at < :cutoff"), {"cutoff": cutoff})
+        # Webhook deliveries are only kept to show the last few on the page.
+        await db.execute(text("delete from webhook_deliveries where created_at < now() - interval '30 days'"))
         await db.execute(text("delete from queue_reports where ts < now() - interval '7 days'"))
         # Log lines have their own, shorter life; a project can have its own number of days.
         await db.execute(text("""
@@ -86,6 +91,8 @@ async def worker(settings: Settings | None = None) -> None:
                 await send_pending_slack(sessions, settings, client)
                 await send_pending_push(sessions, settings, client)
                 await send_pending_telegram(sessions, settings, client)
+                await send_pending_webhooks(sessions, settings, client)
+                await send_pending_github(sessions, settings, client)
                 if settings.telegram_configured and due("telegram-webhook", 6 * 3600):
                     # Where Telegram sends the bot's messages; repeating it is harmless.
                     try:

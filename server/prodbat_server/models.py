@@ -133,6 +133,37 @@ class Project(Base):
     telegram_code_at: Mapped[dt.datetime | None] = timestamp()
     # Why Telegram stopped taking messages (the bot was blocked or removed from the group).
     telegram_error: Mapped[str | None] = mapped_column(Text)
+    # A signed webhook: each problem, update and fix check is POSTed as JSON to the
+    # owner's HTTPS address, signed with the secret (kept, because signing needs it).
+    # A hosted plan can switch it off. The error says why it was turned off.
+    webhook_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    webhook_url: Mapped[str | None] = mapped_column(Text)
+    webhook_secret: Mapped[str | None] = mapped_column(Text)
+    webhook_error: Mapped[str | None] = mapped_column(Text)
+    # Since when every attempt has failed, and how many answers in a row were 410 Gone.
+    webhook_failing_since: Mapped[dt.datetime | None] = timestamp()
+    webhook_gone: Mapped[int] = mapped_column(default=0, server_default="0")
+    # GitHub issues through Prodbat's GitHub App: the installation the owner made,
+    # the repositories it can see ({"name": "ann/shop", "private": true}), and the
+    # one they picked. A hosted plan can switch it off.
+    github_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    github_installation_id: Mapped[int | None] = mapped_column(BigInteger)
+    github_account: Mapped[str | None] = mapped_column(Text)  # the user or organisation it is installed on
+    github_repos: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    github_repo: Mapped[str | None] = mapped_column(Text)  # "ann/shop"
+    # Random value sent to GitHub when installing, checked when GitHub sends the owner back.
+    github_state: Mapped[str | None] = mapped_column(Text)
+    github_state_at: Mapped[dt.datetime | None] = timestamp()
+    # Also open issues for "Needs a look", not only "Broken".
+    github_look: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # The owner's own line at the end of each issue ("@claude please fix this"), and
+    # GitHub logins to assign ("Copilot, ann").
+    github_mention: Mapped[str | None] = mapped_column(Text)
+    github_assignees: Mapped[str | None] = mapped_column(Text)
+    # Why issues stopped (the app was uninstalled, the repository is out of reach).
+    github_error: Mapped[str | None] = mapped_column(Text)
+    # Something GitHub refused that we worked around (an assignee it wouldn't take).
+    github_note: Mapped[str | None] = mapped_column(Text)
 
 
 class DailySalt(Base):
@@ -282,6 +313,10 @@ class Incident(Base):
     slack_ts: Mapped[str | None] = mapped_column(Text)
     # The first Telegram message's id, so later ones reply to it.
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    # The GitHub issue opened for it, in the project's repository, and a hash of
+    # the last comment posted there, so the same words are never posted twice in a row.
+    github_issue: Mapped[int | None] = mapped_column(BigInteger)
+    github_said: Mapped[str | None] = mapped_column(Text)
 
 
 class Mute(Base):
@@ -415,6 +450,57 @@ class PushMessage(Base):
     title: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
     urgent: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    sent_at: Mapped[dt.datetime | None] = timestamp()
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class WebhookDelivery(Base):
+    """Outbox for the project's webhook. The body is written on the first
+    attempt and kept, so every retry sends the same JSON with the same id."""
+
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (
+        Index("ix_webhook_deliveries_due", "next_attempt_at", postgresql_where=text("sent_at is null and gave_up_at is null")),
+        Index("ix_webhook_deliveries_project", "project_id", "created_at"),
+    )
+
+    id: Mapped[int] = pk()
+    project_id: Mapped[uuid.UUID] = project_fk()
+    incident_id: Mapped[int | None] = mapped_column(ForeignKey("incidents.id", ondelete="SET NULL"))
+    incident: Mapped["Incident | None"] = relationship()
+    # "incident.opened", "task.verified", "test"...
+    event: Mapped[str] = mapped_column(Text)
+    # The Prodbat-Delivery header, for the receiver to drop repeats.
+    delivery_id: Mapped[str] = mapped_column(Text, unique=True)
+    # What the event adds to the incident: the recovery sentence, a fix check's answer.
+    data: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    body: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    next_attempt_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
+    last_attempt_at: Mapped[dt.datetime | None] = timestamp()
+    sent_at: Mapped[dt.datetime | None] = timestamp()
+    gave_up_at: Mapped[dt.datetime | None] = timestamp()
+    attempts: Mapped[int] = mapped_column(default=0)
+    # The last answer's status code (null when there was no answer), and what went wrong.
+    last_status: Mapped[int | None] = mapped_column()
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class GitHubPost(Base):
+    """Outbox for GitHub: open an issue (or comment on the one already open), comment,
+    close, or a test issue. Opening is written at send time, with the evidence then."""
+
+    __tablename__ = "github_posts"
+    __table_args__ = (Index("ix_github_posts_unsent", "created_at", postgresql_where=text("sent_at is null")),)
+
+    id: Mapped[int] = pk()
+    project_id: Mapped[uuid.UUID] = project_fk()
+    incident_id: Mapped[int | None] = mapped_column(ForeignKey("incidents.id", ondelete="SET NULL"))
+    incident: Mapped["Incident | None"] = relationship()
+    action: Mapped[str] = mapped_column(Text)  # alert, comment, close, test
+    text: Mapped[str] = mapped_column(Text, default="")  # Markdown for a comment, already escaped
     created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
     sent_at: Mapped[dt.datetime | None] = timestamp()
     attempts: Mapped[int] = mapped_column(default=0)

@@ -75,7 +75,9 @@ a { color: var(--ink); }
 .steps .done { color: var(--muted); }
 button.small { min-height: 40px; padding: 0 14px; font-size: 14px; align-self: flex-start; }
 code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.9em; }
-#texts input { font: inherit; min-height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid #B9BEB3; background: #FFF; min-width: min(260px, 100%); }
+#texts input, #webhook input[type=url], #github input:not([type]), #github select { font: inherit; min-height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid #B9BEB3; background: #FFF; min-width: min(260px, 100%); }
+#github input:not([type]) { width: min(520px, 100%); margin-top: 6px; }
+#github label { display: block; }
 footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
 </style>
 </head>
@@ -332,11 +334,81 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 </section>
 {% endif %}
 
+{% if github %}
+<section class="card list" id="github">
+<h2>GitHub issues</h2>
+{% if gh.github_error %}
+<p><strong>{{ gh.github_error }}</strong> Alerts still go by email.</p>
+<form method="post" action="/d/{{ token }}/github" class="actions"><button class="primary">Connect GitHub again</button></form>
+{% elif gh.github_installation_id and not gh.github_repo %}
+<p>Pick the repository where Prodbat opens issues.{% if gh.github_account %} The app can see these in {{ gh.github_account }}:{% endif %}</p>
+{% if gh.github_repos %}
+<form method="post" action="/d/{{ token }}/github/repo" class="actions">
+<select name="repo" aria-label="Repository">{% for r in gh.github_repos %}<option value="{{ r.name }}">{{ r.name }}{% if not r.private %} (public){% endif %}</option>{% endfor %}</select>
+<button class="primary">Open issues here</button>
+</form>
+<p class="muted">Issues include error messages and log lines, so a private repository is best. In a public one, anyone can read them.</p>
+{% else %}<p class="muted">The app can't see any repository yet. On GitHub, give it access to this site's repository, then refresh.</p>{% endif %}
+<div class="actions">
+<form method="post" action="/d/{{ token }}/github/refresh"><button class="quiet">Refresh the list</button></form>
+<form method="post" action="/d/{{ token }}/github/remove"><button class="quiet">Disconnect GitHub</button></form>
+</div>
+{% elif gh.github_installation_id %}
+<p>Each Broken problem{% if gh.github_look %}, and each Needs a look,{% endif %} opens an issue in <strong>{{ gh.github_repo }}</strong> labelled <code>prodbat</code>, with the task and the evidence for a coding agent. Later news is a comment, and "Working again" closes it. What picks the issue up is up to you: an agent you assign or mention, or a workflow that watches the label.</p>
+{% if gh.github_note %}<p><strong>{{ gh.github_note }}</strong></p>{% endif %}
+<form method="post" action="/d/{{ token }}/github/settings" class="plain">
+<label><input type="checkbox" name="look" value="1"{% if gh.github_look %} checked{% endif %}> Also open issues for Needs a look</label>
+<label>A line to end each issue with <span class="muted">(optional, such as <code>@claude please fix this</code>)</span><br>
+<input name="mention" maxlength="300" value="{{ gh.github_mention or '' }}" placeholder="@claude please investigate and open a PR"></label>
+<label>Assign to <span class="muted">(optional, GitHub logins separated by commas)</span><br>
+<input name="assignees" maxlength="400" value="{{ gh.github_assignees or '' }}" placeholder="ann, octocat"></label>
+<p class="muted">GitHub doesn't let an app assign Copilot's coding agent. To hand issues to Copilot, use the small workflow in the guide for cloud agents, which assigns it with your own token.</p>
+<div class="actions"><button>Save</button></div>
+</form>
+<div class="actions">
+<form method="post" action="/d/{{ token }}/github/test"><button>Open a test issue (it's closed straight away)</button></form>
+<form method="post" action="/d/{{ token }}/github/remove"><button class="quiet">Disconnect GitHub</button></form>
+</div>
+{% else %}
+{% if gh.github_note %}<p><strong>{{ gh.github_note }}</strong></p>{% endif %}
+<p class="muted">Open a GitHub issue for each Broken problem, with the task and the evidence, so a coding agent that works from issues can pick it up. You choose the repository; Prodbat only reads and writes issues there.</p>
+<form method="post" action="/d/{{ token }}/github" class="actions"><button>Connect GitHub</button></form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if webhook %}
+<section class="card list" id="webhook">
+<h2>Webhook</h2>
+{% if webhook_url %}
+{% if webhook_error %}<p><strong>{{ webhook_error }}</strong> Send a test to turn it on again.</p>{% endif %}
+<p>Each problem, change and fix check is sent as signed JSON to <span class="mono">{{ webhook_url }}</span>.</p>
+{% if deliveries %}
+<div class="rows">
+{% for d in deliveries %}<div class="row"><span class="mono">{{ d.event }}</span><span class="muted">{% if d.sent_at %}delivered{% elif d.gave_up_at %}gave up{% elif d.attempts %}retrying{% else %}waiting{% endif %}{% if d.last_status %} · {{ d.last_status }}{% elif d.last_error %} · {{ d.last_error }}{% endif %}{% if d.last_attempt_at %} · {{ d.last_attempt_at.strftime('%-d %b %H:%M') }} UTC{% endif %}</span></div>
+{% endfor %}</div>
+{% endif %}
+<div class="actions">
+<form method="post" action="/d/{{ token }}/webhook/test"><button>Send a test</button></form>
+<form method="post" action="/d/{{ token }}/webhook/secret"><button class="quiet">Show the signing secret</button></form>
+<form method="post" action="/d/{{ token }}/webhook/secret" onsubmit="return confirm('Replace the signing secret? The old one stops working at once.')"><input type="hidden" name="rotate" value="1"><button class="quiet">New signing secret</button></form>
+<form method="post" action="/d/{{ token }}/webhook/remove"><button class="quiet">Remove</button></form>
+</div>
+{% else %}
+<p class="muted">Send each problem as signed JSON to an address you run: a cloud coding agent, a small relay, n8n or Zapier. It has to start with https://.</p>
+<form method="post" action="/d/{{ token }}/webhook" class="actions">
+<input name="url" type="url" required maxlength="500" placeholder="https://example.com/prodbat-hook" aria-label="Webhook address">
+<button>Add webhook</button>
+</form>
+{% endif %}
+</section>
+{% endif %}
+
 <footer>
 <span class="muted">{% if page.has_logs %}<a href="/d/{{ token }}/logs">Logs</a> · {% endif %}This page has no settings.{% if alert_email %} Alerts go to {{ alert_email }}.{% else %} No email address is set, so alerts have nowhere to go.{% endif %}</span>
 <span class="actions">
 <form method="post" action="/d/{{ token }}/key" onsubmit="return confirm('Replace the secret key? The old one stops working at once, and your host will need the new one.')"><button class="quiet">New secret key</button></form>
-{% if can_test %}<form method="post" action="/d/{{ token }}/test-alert" id="test-alert"><button>Send me a test alert</button></form>{% endif %}
+{% if can_test %}<form method="post" action="/d/{{ token }}/test-alert" id="test-alert"><button>Send me a test alert</button></form>{% if github_issues_on %}<span class="muted">GitHub gets a test issue, closed straight away.</span>{% endif %}{% endif %}
 </span>
 </footer>
 </main>

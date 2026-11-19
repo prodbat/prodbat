@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from . import push, slack, telegram
+from . import github, push, slack, telegram, webhooks
 from .api import queue_test_alert, script_tag, test_destinations
 from .incidents import agent_prompt, resolve
 from .models import Email, Incident, Mute, Project, PushSubscription, SiteCheck, hash_secret, new_secret
@@ -58,6 +58,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
     async with request.app.state.sessions() as db:
         project = await project_by_token(request, db, token)
         devices = await push.devices(db, project, settings)
+        deliveries = await webhooks.recent(db, project) if project.webhook_url else []
         places = await test_destinations(db, project, settings) if sent == "test" else ""
         summary = await gather(db, project, dt.datetime.now(dt.UTC))
         broken = next((p for p in summary.problems if p.level == "broken" and p.id), None)
@@ -81,7 +82,19 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
               "slackoff": "Slack is disconnected. Alerts still go by email.",
               "pushon": "Notifications are on for this device. Send a test alert to see one.",
               "pushoff": "That device won't get notifications any more.",
-              "telegramoff": "Telegram is disconnected. Alerts still go by email."}.get(sent or "")
+              "telegramoff": "Telegram is disconnected. Alerts still go by email.",
+              "webhookoff": "The webhook is removed. Nothing more is sent to it.",
+              "webhooktest": "A test delivery is on its way to your webhook.",
+              "webhookbad": "That address can't be used. It has to start with https:// and be reachable from the "
+                            "internet, not a private network.",
+              "githubon": "GitHub is connected." + (f" Issues will open in {project.github_repo}." if project.github_repo
+                                                    else " Pick the repository for issues below."),
+              "githubno": "GitHub wasn't connected. Nothing changed.",
+              "githubrepo": f"Issues will open in {project.github_repo}.",
+              "githubsaved": "Saved.",
+              "githubtest": f"A test issue is on its way to {project.github_repo}. It is closed straight away.",
+              "githuboff": "GitHub is disconnected. To remove the app from GitHub too, open your GitHub settings, "
+                           "then Applications."}.get(sent or "")
     setup = setup_steps(project, summary, emailed)
     return templates.TemplateResponse(request, "page.html", {
         "page": summary, "token": token, "script_tag": script_tag(settings, project), "broken": broken,
@@ -99,8 +112,13 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         "telegram": telegram.can_connect(project, settings), "telegram_chat": project.telegram_chat,
         "telegram_connected": bool(project.telegram_chat_id), "telegram_error": project.telegram_error,
         "telegram_links": telegram.links(project, settings) if telegram.can_connect(project, settings) else None,
+        "webhook": webhooks.can_add(project, settings), "webhook_url": project.webhook_url,
+        "webhook_error": project.webhook_error, "deliveries": deliveries,
+        "github": github.can_connect(project, settings), "gh": project,
+        "github_issues_on": github.can_post(project, settings),
         "can_test": bool(project.alert_email) or slack.can_post(project, settings) or bool(devices)
-                    or telegram.can_post(project, settings),
+                    or telegram.can_post(project, settings) or webhooks.can_post(project, settings)
+                    or github.can_post(project, settings),
     }, headers=PRIVATE)
 
 
@@ -292,6 +310,187 @@ async def telegram_remove(request: Request, token: str) -> RedirectResponse:
         await telegram.disconnect(db, project)
         await db.commit()
     return RedirectResponse(f"/d/{token}?sent=telegramoff#telegram", status_code=303)
+
+
+# ---- a signed webhook -------------------------------------------------------------
+
+def show_secret(request: Request, project: Project, token: str, new: bool) -> HTMLResponse:
+    return templates.TemplateResponse(request, "webhook_secret.html", {
+        "domain": project.domain, "token": token, "secret": project.webhook_secret, "url": project.webhook_url,
+        "new": new}, headers=PRIVATE)
+
+
+@router.post("/d/{token}/webhook", response_class=HTMLResponse)
+async def webhook_add(request: Request, token: str, url: str = Form(...)):
+    """Keep the address and make its signing secret, then show the secret."""
+    settings = request.app.state.settings
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        if not webhooks.can_add(project, settings):
+            raise HTTPException(403, "Webhooks are not available for this site.")
+        request.app.state.limiter.check("webhook", str(project.id), 10, 3600)
+        if await webhooks.check_url_resolves_publicly(url):
+            return RedirectResponse(f"/d/{token}?sent=webhookbad#webhook", status_code=303)
+        webhooks.connect(project, url)
+        await db.commit()
+    return show_secret(request, project, token, new=True)
+
+
+@router.post("/d/{token}/webhook/secret", response_class=HTMLResponse)
+async def webhook_secret(request: Request, token: str, rotate: str = Form("")):
+    """Show the signing secret again, or replace it (the old one stops at once)."""
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        if not project.webhook_url:
+            raise HTTPException(404, "There is no webhook.")
+        if rotate:
+            request.app.state.limiter.check("webhook", str(project.id), 10, 3600)
+            project.webhook_secret = webhooks.new_secret()
+            await db.commit()
+    return show_secret(request, project, token, new=bool(rotate))
+
+
+@router.post("/d/{token}/webhook/test")
+async def webhook_test(request: Request, token: str) -> RedirectResponse:
+    """Send a test event. After the webhook was turned off, this turns it on again."""
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        request.app.state.limiter.check("test-alert", str(project.id), 5, 3600)
+        if project.webhook_error:
+            webhooks.turn_on_again(project)
+        queued = webhooks.post_test(db, project, request.app.state.settings)
+        await db.commit()
+    if not queued:
+        raise HTTPException(400, "There is no webhook to test.")
+    return RedirectResponse(f"/d/{token}?sent=webhooktest#webhook", status_code=303)
+
+
+@router.post("/d/{token}/webhook/remove")
+async def webhook_remove(request: Request, token: str) -> RedirectResponse:
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        webhooks.disconnect(project)
+        await db.commit()
+    return RedirectResponse(f"/d/{token}?sent=webhookoff#webhook", status_code=303)
+
+
+# ---- GitHub issues ----------------------------------------------------------------
+
+GITHUB_COOKIE = "pb_github"
+
+
+@router.post("/d/{token}/github")
+async def github_start(request: Request, token: str) -> RedirectResponse:
+    """Off to GitHub to install the app; GitHub sends the owner back to /github/setup."""
+    settings = request.app.state.settings
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        if not github.can_connect(project, settings):
+            raise HTTPException(403, "GitHub is not available for this site.")
+        request.app.state.limiter.check("github", str(project.id), 10, 3600)
+        url = github.install_url(project, settings)
+        await db.commit()
+    response = RedirectResponse(url, status_code=303)
+    # GitHub hands the state back to the Setup URL, but that isn't promised in its
+    # docs, so the cookie carries it too.
+    response.set_cookie(GITHUB_COOKIE, f"{project.id.hex}.{project.github_state}", max_age=3600, httponly=True,
+                        samesite="lax", secure=settings.base.startswith("https://"))
+    return response
+
+
+@router.get("/github/setup")
+async def github_setup(request: Request, installation_id: str = "", state: str = "",
+                       setup_action: str = "") -> RedirectResponse:
+    settings = request.app.state.settings
+    if not settings.github_configured:
+        raise HTTPException(404, "Not Found")
+    state = state or request.cookies.get(GITHUB_COOKIE, "")
+    project_hex, _, nonce = state.partition(".")
+    try:
+        project_id = uuid.UUID(hex=project_hex)
+    except ValueError:
+        raise HTTPException(400, "This link from GitHub is not one we made.")
+    async with request.app.state.sessions() as db:
+        project = await db.get(Project, project_id)
+        if project is None or not project.github_state or not nonce or project.github_state_at is None \
+                or not hmac.compare_digest(project.github_state, nonce) \
+                or dt.datetime.now(dt.UTC) - project.github_state_at > github.STATE_LIFE:
+            raise HTTPException(400, "This link from GitHub is not one we made, or it was already used.")
+        guard = request.app.state.page_guard
+        if guard is not None:
+            await guard(request, project)
+        token = project.page_token
+        if installation_id.isdigit():
+            problem = await github.finish_connecting(db, request.app.state.http, settings, project,
+                                                    int(installation_id))
+        else:
+            problem = "GitHub didn't finish connecting. Nothing changed."
+        project.github_state = project.github_state_at = None
+        if problem:
+            project.github_note = problem
+        await db.commit()
+    response = RedirectResponse(f"/d/{token}?sent={'githubno' if problem else 'githubon'}#github", status_code=303)
+    response.delete_cookie(GITHUB_COOKIE)
+    return response
+
+
+@router.post("/d/{token}/github/repo")
+async def github_repo(request: Request, token: str, repo: str = Form(...)) -> RedirectResponse:
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        if not await github.pick_repo(db, project, repo):
+            raise HTTPException(400, "Prodbat's app can't see that repository. Refresh the list or connect again.")
+        await db.commit()
+    return RedirectResponse(f"/d/{token}?sent=githubrepo#github", status_code=303)
+
+
+@router.post("/d/{token}/github/refresh")
+async def github_refresh(request: Request, token: str) -> RedirectResponse:
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        if not project.github_installation_id:
+            raise HTTPException(400, "GitHub is not connected.")
+        request.app.state.limiter.check("github", str(project.id), 10, 3600)
+        await github.refresh_repos(request.app.state.http, request.app.state.settings, project)
+        await db.commit()
+    return RedirectResponse(f"/d/{token}#github", status_code=303)
+
+
+@router.post("/d/{token}/github/settings")
+async def github_settings(request: Request, token: str, look: str = Form(""), mention: str = Form(""),
+                          assignees: str = Form("")) -> RedirectResponse:
+    names = github.clean_assignees(assignees)
+    if names is None:
+        raise HTTPException(400, "Assignees are GitHub logins separated by commas, such as ann, octocat (up to 10).")
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        project.github_look = bool(look)
+        project.github_mention = github.clean_mention(mention)
+        project.github_assignees = ", ".join(names) or None
+        project.github_note = None
+        await db.commit()
+    return RedirectResponse(f"/d/{token}?sent=githubsaved#github", status_code=303)
+
+
+@router.post("/d/{token}/github/test")
+async def github_test(request: Request, token: str) -> RedirectResponse:
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        request.app.state.limiter.check("test-alert", str(project.id), 5, 3600)
+        queued = github.post_test(db, project, request.app.state.settings)
+        await db.commit()
+    if not queued:
+        raise HTTPException(400, "Pick a repository first.")
+    return RedirectResponse(f"/d/{token}?sent=githubtest#github", status_code=303)
+
+
+@router.post("/d/{token}/github/remove")
+async def github_remove(request: Request, token: str) -> RedirectResponse:
+    async with request.app.state.sessions() as db:
+        project = await project_by_token(request, db, token)
+        await github.disconnect(db, project)
+        await db.commit()
+    return RedirectResponse(f"/d/{token}?sent=githuboff#github", status_code=303)
 
 
 # ---- notifications on a device ---------------------------------------------------

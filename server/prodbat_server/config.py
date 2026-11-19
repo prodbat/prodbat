@@ -79,6 +79,27 @@ class Settings(BaseSettings):
     def telegram_configured(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_bot_name and self.telegram_webhook_secret)
 
+    # A GitHub App, so owners can have a GitHub issue opened for each problem,
+    # for a coding agent that works from issues. This is not GitHub sign-in (the
+    # hosted service's PRODBAT_GITHUB_CLIENT_ID is a separate OAuth app). The
+    # private key is the PEM GitHub gives you; in one line, write its line breaks
+    # as \n. Without these the page doesn't offer GitHub. docs/self-hosting.md
+    # has the steps.
+    github_app_id: str | None = None
+    github_app_slug: str | None = None
+    github_app_private_key: str | None = None
+
+    @property
+    def github_configured(self) -> bool:
+        return bool(self.github_app_id and self.github_app_slug and self.github_app_private_key)
+
+    @property
+    def github_private_key_pem(self) -> bytes:
+        return (self.github_app_private_key or "").strip().replace("\\n", "\n").encode()
+
+    # Signed webhooks need no settings; this turns them off for a whole server.
+    webhooks: bool = True
+
     # Where this process checks sites from, such as "oregon". Probes in other
     # regions (`python -m prodbat_server probe`) record checks under their own name.
     region: str = ""

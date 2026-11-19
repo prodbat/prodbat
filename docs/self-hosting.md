@@ -47,6 +47,8 @@ All settings are environment variables. `.env.example` lists them with what each
 | `PRODBAT_SLACK_CLIENT_ID`, `_CLIENT_SECRET` | Alerts in Slack; without them, Slack isn't offered. See below |
 | `PRODBAT_VAPID_PUBLIC_KEY`, `_PRIVATE_KEY`, `_SUBJECT` | Notifications on phones and computers (web push); without them, they aren't offered. See below |
 | `PRODBAT_TELEGRAM_BOT_TOKEN`, `_BOT_NAME`, `_WEBHOOK_SECRET` | Alerts in Telegram; without them, Telegram isn't offered. See below |
+| `PRODBAT_GITHUB_APP_ID`, `_APP_SLUG`, `_APP_PRIVATE_KEY` | GitHub issues for each problem, for coding agents that work from issues; without them, GitHub isn't offered. See below |
+| `PRODBAT_WEBHOOKS` | Optional: `false` stops project pages offering a signed webhook. On by default; it needs no other setting |
 | `PRODBAT_WATCHER_URL` | A URL requested once a minute, so something outside can notice if this server stops |
 
 ### Slack
@@ -101,6 +103,30 @@ uv run python -m prodbat_server telegram-webhook
 ```
 
 The worker also does this when it starts and every six hours, so it heals itself after a change of address. Telegram only sends to an `https://` address, so `PRODBAT_PUBLIC_URL` has to be one. The bot only answers `/start` with a code from a project page; it ignores everything else. Each project stores the chat's id and name in the `projects` table.
+
+### GitHub issues and webhooks for coding agents
+
+A project page can open a GitHub issue for each problem and send each problem to a signed webhook, so a cloud coding agent can pick it up. [cloud-agents.md](cloud-agents.md) explains what is sent and how to connect the common agents.
+
+The webhook needs no setup on the server. Owners add an `https://` address on their page. The worker sends to it through the same client as the site checks, so private and internal addresses are refused when the address is added and again each time something is sent. Set `PRODBAT_WEBHOOKS=false` to turn webhooks off for the whole server.
+
+GitHub issues need a GitHub App, made once for your server. This is separate from any GitHub sign-in. On GitHub, open Settings → Developer settings → GitHub Apps → New GitHub App:
+
+- **GitHub App name**: anything, such as "Prodbat for yourdomain". Its URL name (the slug) is the last part of the app's public page, `https://github.com/apps/<slug>`.
+- **Homepage URL**: your `PRODBAT_PUBLIC_URL`.
+- **Callback URL**: leave it empty, and leave "Request user authorization (OAuth) during installation" unticked. Prodbat doesn't sign anyone in with this app.
+- **Setup URL**: `https://prodbat.yourdomain.com/github/setup`, and tick **Redirect on update**, so that changing which repositories the app can use also comes back to Prodbat.
+- **Webhook**: untick Active. Prodbat doesn't need GitHub's events.
+- **Repository permissions**: Issues: Read and write. Metadata: Read-only (GitHub adds it). Nothing else.
+- **Where can this GitHub App be installed?**: "Only on this account" if every site you watch is in your own account or organisation, otherwise "Any account".
+
+Create it, then:
+
+- `PRODBAT_GITHUB_APP_ID`: the App ID shown at the top of the app's settings.
+- `PRODBAT_GITHUB_APP_SLUG`: the slug from the public page's address.
+- `PRODBAT_GITHUB_APP_PRIVATE_KEY`: under Private keys, press Generate a private key and use the `.pem` file GitHub downloads. If your environment can't hold several lines, write it on one line with `\n` for each line break: `awk 'NF {printf "%s\\n", $0}' key.pem`.
+
+Restart the server and the worker. Each project page then offers "Connect GitHub". The owner installs the app on the repositories they choose and comes back to the page to pick one. Prodbat checks that the installation was made or changed after the owner pressed the button, so nobody can attach someone else's installation by typing its number into the address. Keep the private key secret: with it, anyone can act as the app on every repository it is installed on.
 
 ## What you take on
 

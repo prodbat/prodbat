@@ -303,7 +303,21 @@ async def next_task(db: AsyncSession, project: Project, settings: Settings) -> d
 
 async def check_task(db: AsyncSession, project: Project, settings: Settings, http, tid: str) -> dict:
     """Look again from Prodbat's side. Returns fixed true, false, or
-    null when it is too early to tell."""
+    null when it is too early to tell. The answer also goes to the project's
+    webhook and to the problem's GitHub issue, whoever asked (the CLI, the MCP
+    tool or the page)."""
+    from . import github, webhooks
+
+    result = await _check_task(db, project, settings, http, tid)
+    incident = await db.get(Incident, int(tid[1:])) if re.fullmatch(r"[Tt]\d{1,15}", tid) else None
+    task_id = tid.upper()
+    await webhooks.post_check(db, project, settings, task_id, result, incident)
+    github.post_check(db, project, incident, settings, task_id, result)
+    await db.commit()
+    return result
+
+
+async def _check_task(db: AsyncSession, project: Project, settings: Settings, http, tid: str) -> dict:
     now = dt.datetime.now(dt.UTC)
 
     def answer(fixed, sentence):

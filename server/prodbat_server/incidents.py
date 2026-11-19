@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import Settings
 from .models import Email, Incident, Mute, Project
-from . import push, slack, telegram
+from . import github, push, slack, telegram, webhooks
 from .texts import queue_text
 from .words import clock, lasted
 
@@ -63,7 +63,8 @@ def alert_body(project: Project, incident: Incident, settings: Settings) -> str:
     ])
 
 
-def queue_alert(db: AsyncSession, project: Project, incident: Incident, settings: Settings) -> None:
+def queue_alert(db: AsyncSession, project: Project, incident: Incident, settings: Settings,
+                updated: bool = False) -> None:
     subject = f"{PREFIX[incident.level]}: {incident.title} on {project.domain}"
     message_id = queue_email(db, project, settings, subject, alert_body(project, incident, settings),
                              in_reply_to=incident.message_id)
@@ -73,6 +74,8 @@ def queue_alert(db: AsyncSession, project: Project, incident: Incident, settings
     telegram.post_alert(db, project, incident, settings, PREFIX[incident.level], incident.todo or DEFAULT_TODO,
                         agent_prompt(project, incident), clock(incident.started_at, project.timezone))
     push.post_alert(db, project, incident, settings, PREFIX[incident.level])
+    webhooks.post_alert(db, project, incident, settings, updated)
+    github.post_alert(db, project, incident, settings)
     if incident.level == "broken":  # texts only when customers are affected now
         queue_text(db, project, settings, f"Prodbat. {subject}. Since {clock(incident.started_at, project.timezone)}. "
                                           f"{settings.base}/d/{project.page_token}")
@@ -112,7 +115,7 @@ async def report(db: AsyncSession, project: Project, settings: Settings, *, kind
         incident.data = data or incident.data
     if worse:
         incident.level = "broken"
-        queue_alert(db, project, incident, settings)
+        queue_alert(db, project, incident, settings, updated=True)
     return incident
 
 
@@ -132,6 +135,9 @@ def digest(db: AsyncSession, project: Project, new: list[Incident], settings: Se
         slack.post_digest(db, project, settings, new, about)
         telegram.post_digest(db, project, settings, new, about)
         push.post_digest(db, project, settings, new, about)
+        for incident in new:  # one each, for agents and issues
+            webhooks.post_alert(db, project, incident, settings)
+            github.post_alert(db, project, incident, settings)
 
 
 def resolve(db: AsyncSession, project: Project, incident: Incident, settings: Settings, now: dt.datetime,
@@ -150,3 +156,5 @@ def resolve(db: AsyncSession, project: Project, incident: Incident, settings: Se
         slack.post_recovery(db, project, incident, settings, recovery, duration)
         telegram.post_recovery(db, project, incident, settings, recovery, duration)
         push.post_recovery(db, project, incident, settings, recovery, duration)
+    webhooks.post_resolved(db, project, incident, settings, recovery)
+    github.post_recovery(db, project, incident, settings, recovery, clock(now, project.timezone))
