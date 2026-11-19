@@ -32,6 +32,10 @@ class Site:
         self.rdap = {"events": [{"eventAction": "expiration", "eventDate": "2030-08-03T00:00:00Z"}]}
         self.osv = {}  # path -> json, for api.osv.dev
         self.json = {}  # path -> json, for endoflife.date, deps.dev and nodejs.org
+        # Answers for one address ("http://anysite.com/") or one path ("/.env"), as
+        # (status, body, headers). Everything else gets the usual answer.
+        self.pages = {}
+        self.asked = []  # every address requested of the site itself
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.host == "rdap.org":
@@ -41,6 +45,11 @@ class Site:
         if request.url.host in ("endoflife.date", "api.deps.dev", "nodejs.org"):
             found = self.json.get(request.url.raw_path.decode().split("?")[0])
             return httpx.Response(200, json=found) if found is not None else httpx.Response(404)
+        self.asked.append(str(request.url))
+        page = self.pages.get(str(request.url)) or self.pages.get(request.url.path)
+        if page is not None:
+            status, body, headers = page
+            return httpx.Response(status, text=body, headers=headers)
         answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
         if answer == "timeout":
             raise httpx.ReadTimeout("slow", request=request)

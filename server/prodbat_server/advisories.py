@@ -64,6 +64,29 @@ async def rating(client: httpx.AsyncClient, vuln: dict) -> str:
     return "critical" if score >= 9 else "high" if score >= SERIOUS_SCORE else "moderate" if score >= 4 else "low"
 
 
+async def known_problems(client: httpx.AsyncClient, ecosystem: str, name: str, version: str,
+                         timeout: float = 5.0) -> list[dict]:
+    """Every advisory OSV lists for one package version, in a single request,
+    for a quick look such as the free check: id, summary, rating (from the
+    advisory's own label only, so there is no second round of lookups) and
+    the lowest fixed version above the one in use."""
+    response = await client.post(f"{OSV}/query", timeout=timeout, json={
+        "package": {"name": name, "ecosystem": ecosystem}, "version": version})
+    response.raise_for_status()
+    found, seen = [], set()
+    for vuln in response.json().get("vulns", []):
+        names = {vuln["id"], *vuln.get("aliases", [])}
+        if names & seen:
+            continue
+        seen |= names
+        _details.setdefault(vuln["id"], vuln)
+        label = str((vuln.get("database_specific") or {}).get("severity", "")).upper()
+        found.append({"id": vuln["id"], "summary": (vuln.get("summary") or "").strip().rstrip(".") or None,
+                      "severity": {"MEDIUM": "moderate"}.get(label, label.lower()) or None,
+                      "fixed": fixed_version(vuln, name, version)})
+    return found
+
+
 async def find_problems(client: httpx.AsyncClient, deps: list[Dependency]):
     """Returns (serious, lesser): dependency id -> [(advisory, fixed version)]
     for the ones to tell the owner about, and dependency id -> sentences

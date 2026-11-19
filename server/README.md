@@ -38,6 +38,7 @@ Everything is in `prodbat_server/`.
 | `ingest.py` | `POST /api/e`, where the script posts |
 | `sources.py` | Names where a visitor came from |
 | `checks.py` | Loads each site from outside; certificate and domain expiry |
+| `security.py` | The free check's look for obvious holes: http:// to https://, security headers, cookie flags, a public .env or .git, framework versions on OSV |
 | `detect.py` | The rules that turn what was reported into problems. They are first guesses and are all at the top of the file |
 | `incidents.py` | Opens and closes problems and writes the emails |
 | `mailer.py` | Sends the outbox over SMTP |

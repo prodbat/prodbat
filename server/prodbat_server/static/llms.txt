@@ -33,7 +33,7 @@ Alerts go by email, and to a Slack channel if the owner connects one on their pa
 - `GET {server}/api/status`, `POST {server}/api/verify`, `GET {server}/api/suggestions[/id]`: need the project's secret key
 - `POST {server}/api/errors`, `POST {server}/api/logs`, `POST {server}/api/queues`, `POST {server}/api/ping/<job>?every=24h`, `POST {server}/api/stripe`, `PUT {server}/api/dependencies`, `PUT {server}/api/runtime`: from the site's own server, with the secret key
 - `GET {server}/api/logs?q=&level=&since=1h`, `PUT {server}/api/config`: with the secret key
-- `GET {server}/api/check?url=yourapp.com`: no key
+- `GET {server}/api/check?url=yourapp.com`: no key. A one-off outside look: load time, certificate, domain renewal, and obvious holes (http:// not moved to https://, missing security headers and cookie flags, a public .env or .git, a framework version with known advisories on OSV.dev)
 
 ## When not to use it
 

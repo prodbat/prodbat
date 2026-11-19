@@ -62,3 +62,32 @@ Leave out what you cannot measure. The owner is told when the oldest job has wai
 ## Payments
 
 `POST /api/stripe` with the Stripe event object, from your webhook handler, after you have checked Stripe's signature.
+
+## A one-off check of any site
+
+`GET /api/check?url=yourapp.com` needs no key and is limited to 10 a minute from one address. It loads the home page from outside, checks the certificate and when the domain needs renewing, and looks for obvious holes. Every request is a plain GET a browser could make:
+
+- `http://` should move visitors to `https://`.
+- The home page should send `Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options` (or `frame-ancestors`) and `X-Content-Type-Options: nosniff`, and set its cookies `Secure` (and `HttpOnly` for sign-in cookies).
+- `/.env`, `/.git/config` and `/.git/HEAD` should not be served. Only the first few KB are read, a file counts only if it reads like the real thing (so a site that answers every address with its home page is not flagged), and what it holds is never stored or returned.
+- A framework version shown in `X-Powered-By`, `Server` or `<meta name="generator">` is looked up on OSV.dev.
+
+```json
+{"domain": "yourapp.com",
+ "working": ["Your site loads (0.4 seconds from here).", "..."],
+ "worth_fixing": ["Anyone can download your .env file at yourapp.com/.env. ..."],
+ "found": ["Hosted on Vercel.", "Tells visitors it runs Next.js 14.1.0 (in its x-powered-by header)."],
+ "security": {
+   "checked": ["https_redirect", "headers", "exposed_files", "versions", "cookies"],
+   "https_redirect": true,
+   "exposed_files": {"/.env": true, "/.git/config": false, "/.git/HEAD": false},
+   "software": [{"name": "Next.js", "version": "14.1.0", "where": "x-powered-by header"}],
+   "findings": [
+     {"level": "broken", "kind": "exposed_file", "path": "/.env", "exposed": true, "plain": "...", "engineer": "..."},
+     {"level": "look", "kind": "known_vulnerable_version", "name": "Next.js", "version": "14.1.0", "package": "next",
+      "ecosystem": "npm", "fixed": "14.2.25", "advisories": [{"id": "GHSA-f82v-jwr5-mffw", "severity": "critical", "fixed": "14.2.25"}],
+      "plain": "...", "engineer": "..."}]},
+ "text": "# yourapp.com\n..."}
+```
+
+`level` is `broken` (an exposed `.env` or `.git`), `look` (a framework version with known security problems, or no redirect to `https://`) or `minor` (missing headers or cookie flags). Each finding has a `plain` sentence for the owner and an `engineer` sentence for whoever fixes it. `https_redirect` and each entry of `exposed_files` is `null` when the site did not answer that request.

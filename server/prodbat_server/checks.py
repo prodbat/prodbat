@@ -41,6 +41,8 @@ class Result:
     headers: dict | None = None
     # Where we ended up after redirects.
     url: str = ""
+    # Each Set-Cookie header of the last answer, kept apart (dict(headers) joins them).
+    cookies: list[str] | None = None
 
 
 def is_public_host(host: str) -> bool:
@@ -83,7 +85,8 @@ async def check_site(client: httpx.AsyncClient, domain: str, path: str = "/") ->
         return Result(False, error=describe(exc))
     ms = int((time.monotonic() - started) * 1000)
     status = response.status_code
-    extra = {"headers": dict(response.headers), "url": str(response.url)}
+    extra = {"headers": dict(response.headers), "url": str(response.url),
+             "cookies": response.headers.get_list("set-cookie")}
     if status in CANNOT_TELL:
         return Result(None, status, ms, **extra)
     if response.is_success:

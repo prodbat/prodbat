@@ -43,7 +43,9 @@ TOOLS = [
      "inputSchema": NO_ARGS},
     {"name": "prodbat_check",
      "description": "A one-off look at any public site from outside: does it load, is the secure connection "
-                    "good, when does the domain run out. Needs no key.",
+                    "good, when does the domain run out, and any obvious holes (a public .env or .git, "
+                    "missing security headers, no https redirect, a framework version with known security "
+                    "problems). Needs no key.",
      "inputSchema": {"type": "object", "properties": {"url": {"type": "string", "description": "yourapp.com"}},
                      "required": ["url"]}},
     {"name": "prodbat_suggestions",

@@ -13,6 +13,7 @@ import hmac
 import re
 import secrets
 import time
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -20,6 +21,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from .checks import certificate_expiry, check_site, domain_expiry
+from . import security
 from .config import Settings
 from . import slack
 from .flows import SAY, discover_pages
@@ -305,9 +307,10 @@ async def free_check(http, raw: str) -> dict:
     if not DOMAIN.match(domain):
         raise HTTPException(400, f"'{raw}' does not look like a site address, such as yourapp.com.")
     now = dt.datetime.now(dt.UTC)
-    site, www, cert, expires = await asyncio.gather(
+    site, www, cert, expires, passive = await asyncio.gather(
         check_site(http, domain), check_site(http, "www." + domain),
-        asyncio.to_thread(certificate_expiry, domain), domain_expiry(http, domain))
+        asyncio.to_thread(certificate_expiry, domain), domain_expiry(http, domain),
+        security.passive_requests(http, domain))
     working, fixing = [], []
 
     if site.ok:
@@ -338,11 +341,35 @@ async def free_check(http, raw: str) -> dict:
             working.append(f"Your domain is paid up until {day(expires)} {expires.year}.")
 
     found = what_we_found(site.headers or {}, site.body)
+
+    # Obvious holes, from outside. Only what the site itself serves counts:
+    # a home page that redirects to another site says nothing about this one.
+    home_here = bool(site.ok) and security.same_site(urlsplit(site.url).hostname, domain)
+    software = security.leaked_versions(site.headers or {}, site.body) if home_here else []
+    await security.match_advisories(http, software)
+    findings = security.findings(domain, bool(site.ok), site.headers or {}, site.cookies or [], home_here,
+                                 passive, software)
+    fixing[:0] = [f.plain for f in findings if f.level == "broken"]
+    fixing += [f.plain for f in findings if f.level != "broken"]
+    if all(v is False for v in passive["files"].values()):
+        working.append("Your .env file and code history (.git) are not open to the public.")
+    if passive["https_redirect"]:
+        working.append(f"http://{domain} moves visitors to the secure address.")
+    found += [f"Tells visitors it runs {s['name']} {s['version']} (in its {s['where']})." for s in software]
+
     lines = [f"# {domain}", ""]
-    for heading, items in (("Working", working), ("Worth fixing", fixing), ("What we found", found)):
+    for heading, items in (("Working", working), ("Worth fixing", fixing), ("What we found", found),
+                           ("For your engineer", [f.engineer for f in findings])):
         if items:
             lines += [f"{heading}:", *[f"  - {item}" for item in items], ""]
     return {"domain": domain, "working": working, "worth_fixing": fixing, "found": found,
+            "security": {
+                "checked": ["https_redirect", "headers", "exposed_files", "versions", "cookies"],
+                "https_redirect": passive["https_redirect"],
+                "exposed_files": {path: exposed for path, exposed in passive["files"].items()},
+                "software": [{k: s[k] for k in ("name", "version", "where")} for s in software],
+                "findings": [f.as_dict() for f in findings],
+            },
             "text": "\n".join(lines).rstrip() + "\n"}
 
 
