@@ -5,7 +5,7 @@ Prodbat watches your live app from outside. When something breaks, it can hand t
 - **GitHub issues.** Prodbat opens an issue in the repository you pick for each Broken problem (and for Needs a look too, if you turn that on). The issue has the plain summary, the details for an engineer, the task with numbered steps, a prompt for a coding agent, and the evidence. It is labelled `prodbat`. Later news is posted as a comment, and when the problem is fixed Prodbat comments "Checked from outside: working again" and closes the issue.
 - **A signed webhook.** Prodbat POSTs each event as JSON to an `https://` address you give it. That can be your agent's API, a small relay you run, n8n or Zapier.
 
-Both are on your project's page, under GitHub issues and Webhook.
+Both are on your project's page, under GitHub issues and Webhook. Connecting GitHub shows one GitHub screen, "Authorize Prodbat" (and, if Prodbat's app isn't installed yet, GitHub's install page), then you pick one of the repositories your GitHub account can reach.
 
 ## What Prodbat does, and what your agent does
 

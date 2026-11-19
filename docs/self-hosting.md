@@ -47,7 +47,7 @@ All settings are environment variables. `.env.example` lists them with what each
 | `PRODBAT_SLACK_CLIENT_ID`, `_CLIENT_SECRET` | Alerts in Slack; without them, Slack isn't offered. See below |
 | `PRODBAT_VAPID_PUBLIC_KEY`, `_PRIVATE_KEY`, `_SUBJECT` | Notifications on phones and computers (web push); without them, they aren't offered. See below |
 | `PRODBAT_TELEGRAM_BOT_TOKEN`, `_BOT_NAME`, `_WEBHOOK_SECRET` | Alerts in Telegram; without them, Telegram isn't offered. See below |
-| `PRODBAT_GITHUB_APP_ID`, `_APP_SLUG`, `_APP_PRIVATE_KEY` | GitHub issues for each problem, for coding agents that work from issues; without them, GitHub isn't offered. See below |
+| `PRODBAT_GITHUB_APP_ID`, `_APP_SLUG`, `_APP_PRIVATE_KEY`, `_APP_CLIENT_ID`, `_APP_CLIENT_SECRET` | GitHub issues for each problem, for coding agents that work from issues; without them, GitHub isn't offered. See below |
 | `PRODBAT_WEBHOOKS` | Optional: `false` stops project pages offering a signed webhook. On by default; it needs no other setting |
 | `PRODBAT_WATCHER_URL` | A URL requested once a minute, so something outside can notice if this server stops |
 
@@ -114,10 +114,10 @@ GitHub issues need a GitHub App, made once for your server. This is separate fro
 
 - **GitHub App name**: anything, such as "Prodbat for yourdomain". Its URL name (the slug) is the last part of the app's public page, `https://github.com/apps/<slug>`.
 - **Homepage URL**: your `PRODBAT_PUBLIC_URL`.
-- **Callback URL**: leave it empty, and leave "Request user authorization (OAuth) during installation" unticked. Prodbat doesn't sign anyone in with this app.
-- **Setup URL**: `https://prodbat.yourdomain.com/github/setup`, and tick **Redirect on update**, so that changing which repositories the app can use also comes back to Prodbat.
+- **Callback URL**: `https://prodbat.yourdomain.com/github/callback` (your `PRODBAT_PUBLIC_URL` followed by `/github/callback`).
+- Tick **Request user authorization (OAuth) during installation**. GitHub then sends the owner back to the Callback URL after installing, so the **Setup URL** isn't used (GitHub greys it out). **Expire user authorization tokens** can stay ticked; Prodbat uses the owner's token only while they connect and never keeps it.
 - **Webhook**: untick Active. Prodbat doesn't need GitHub's events.
-- **Repository permissions**: Issues: Read and write. Metadata: Read-only (GitHub adds it). Nothing else.
+- **Repository permissions**: Issues: Read and write. Metadata: Read-only (GitHub adds it). Nothing else, and no account permissions.
 - **Where can this GitHub App be installed?**: "Only on this account" if every site you watch is in your own account or organisation, otherwise "Any account".
 
 Create it, then:
@@ -125,8 +125,10 @@ Create it, then:
 - `PRODBAT_GITHUB_APP_ID`: the App ID shown at the top of the app's settings.
 - `PRODBAT_GITHUB_APP_SLUG`: the slug from the public page's address.
 - `PRODBAT_GITHUB_APP_PRIVATE_KEY`: under Private keys, press Generate a private key and use the `.pem` file GitHub downloads. If your environment can't hold several lines, write it on one line with `\n` for each line break: `awk 'NF {printf "%s\\n", $0}' key.pem`.
+- `PRODBAT_GITHUB_APP_CLIENT_ID`: the app's Client ID, shown near the App ID.
+- `PRODBAT_GITHUB_APP_CLIENT_SECRET`: press Generate a new client secret and copy it (GitHub shows it once).
 
-Restart the server and the worker. Each project page then offers "Connect GitHub". The owner installs the app on the repositories they choose and comes back to the page to pick one. Prodbat checks that the installation was made or changed after the owner pressed the button, so nobody can attach someone else's installation by typing its number into the address. Keep the private key secret: with it, anyone can act as the app on every repository it is installed on.
+GitHub is offered only when all five are set. Restart the server and the worker. Each project page then offers "Connect GitHub". The owner sees one GitHub screen, "Authorize Prodbat", and comes back to the page. Prodbat asks GitHub, as that GitHub user, which installations of this app they can use and which repositories in each they can reach, and the owner picks one of those. If the app isn't installed anywhere they can use, they go on to install it first and come back the same way. An installation id typed into the address is never enough on its own: it has to be on the list GitHub gives for the owner's own account. The page shows which GitHub login connected it. Keep the private key and client secret secret: with the key, anyone can act as the app on every repository it is installed on.
 
 ## What you take on
 

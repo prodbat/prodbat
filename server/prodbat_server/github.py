@@ -1,9 +1,15 @@
 """Problems as GitHub issues, for coding agents that work from issues.
 
-The owner presses "Connect GitHub" on their page and installs Prodbat's GitHub
-App on the repositories they choose; GitHub sends them back to /github/setup
-with the installation's id and the one-time state we gave it. They pick one
-repository. From then on each Broken problem (and, if they ask, each Needs a
+The owner presses "Connect GitHub" on their page and sees GitHub's "Authorize
+Prodbat" screen (the App's own user authorization). GitHub sends them back to
+/github/callback with a code and the one-time state we gave it. With the code,
+and only during that request, we ask GitHub which installations of this App the
+owner's GitHub account can use, and which repositories in each it can reach; the
+token is then dropped. If there is none, they go on to install the App and come
+back to the same callback. They pick one repository from what GitHub listed, so
+an installation id typed into an address is never trusted on its own.
+
+From then on each Broken problem (and, if they ask, each Needs a
 look) opens one issue labelled `prodbat`. Later news about it is a comment on
 that issue, and "Working again" comments and closes it. What happens next is
 up to the owner: an agent that is assigned the issue, or mentioned in it, or
@@ -21,6 +27,7 @@ wake an agent or link another issue, and it can't close the code fence it sits i
 import base64
 import datetime as dt
 import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -39,7 +46,12 @@ API = "https://api.github.com"
 MAX_ATTEMPTS = 5
 MAX_BODY = 60_000  # GitHub takes 65,536 characters
 LABEL = "prodbat"
-STATE_LIFE = dt.timedelta(hours=1)
+OAUTH = "https://github.com/login/oauth"
+# Long enough to install the App on GitHub on the way.
+STATE_LIFE = dt.timedelta(minutes=30)
+# What the owner's GitHub account can reach is kept this long for them to pick from.
+PICK_LIFE = dt.timedelta(minutes=10)
+MAX_INSTALLATIONS = 20
 # An issue for the same problem that was closed this recently is reopened instead
 # of opening another, so a problem that comes and goes stays on one issue.
 REOPEN_WITHIN = dt.timedelta(days=7)
@@ -48,8 +60,9 @@ ZWJ = "‍"
 UNINSTALLED = "Prodbat's GitHub App was uninstalled, or lost access. Connect GitHub again to get issues."
 NO_REPO = "Prodbat can no longer reach {repo}. The app may have lost access to it. Connect GitHub again and pick it."
 NO_ISSUES = "Issues are turned off in {repo}. Turn them on in the repository's settings, then connect GitHub again."
-NOT_NEW = ("GitHub didn't confirm that installation was just made or changed, so it wasn't connected. On GitHub, open "
-           "the Prodbat app's settings, change which repositories it can use (add this site's repository), and save.")
+NOT_YOURS = ("GitHub didn't list that installation for your GitHub account, so it wasn't connected. Connect GitHub "
+             "again while signed in to GitHub as someone who can use it.")
+NO_ANSWER = "GitHub didn't finish connecting. Nothing changed. Try again."
 # After GitHub says to slow down, nothing is sent until this time.
 _quiet_until = 0.0
 # Installation tokens, by installation id: (token, when it stops being used).
@@ -197,76 +210,148 @@ async def call(http: httpx.AsyncClient, settings: Settings, project: Project, me
 
 # ---- connecting -------------------------------------------------------------------
 
-def install_url(project: Project, settings: Settings, now: dt.datetime | None = None) -> str:
-    """Where "Connect GitHub" goes. GitHub hands the state back to /github/setup."""
+def new_state(project: Project, now: dt.datetime | None = None) -> str:
+    """A one-time state for this project: "<project id>.<random>". The random part is kept to check it."""
     project.github_state = secrets.token_urlsafe(24)
     project.github_state_at = now or dt.datetime.now(dt.UTC)
-    state = urllib.parse.quote(f"{project.id.hex}.{project.github_state}")
-    return f"https://github.com/apps/{settings.github_app_slug}/installations/new?state={state}"
+    return f"{project.id.hex}.{project.github_state}"
 
 
-async def list_repos(http: httpx.AsyncClient, settings: Settings, installation_id: int) -> list[dict]:
-    token = await installation_token(http, settings, installation_id)
-    repos = []
-    for page in range(1, 4):  # up to 300
-        response = await http.get(f"{API}/installation/repositories", params={"per_page": 100, "page": page},
-                                  headers=HEADERS | {"Authorization": f"Bearer {token}"})
-        if (wait := slow_down_for(response)) is not None:
-            raise SlowDown(wait)
-        if response.status_code in (401, 403, 404):
-            raise Gone(UNINSTALLED)
-        response.raise_for_status()
-        found = response.json().get("repositories") or []
-        repos += [{"name": r["full_name"], "private": bool(r.get("private"))} for r in found if r.get("full_name")]
-        if len(found) < 100:
-            break
-    return sorted(repos, key=lambda r: r["name"].lower())
+def callback_url(settings: Settings) -> str:
+    return f"{settings.base}/github/callback"
 
 
-async def finish_connecting(db, http: httpx.AsyncClient, settings: Settings, project: Project,
-                            installation_id: int) -> str | None:
-    """Keep the installation GitHub sent the owner back with. Returns None when
-    connected, or a sentence saying what went wrong.
+def authorize_url(settings: Settings, state: str) -> str:
+    """GitHub's "Authorize Prodbat" screen, for the App's own user authorization."""
+    return f"{OAUTH}/authorize?" + urllib.parse.urlencode(
+        {"client_id": settings.github_app_client_id, "state": state, "redirect_uri": callback_url(settings)})
 
-    The id arrives in the browser's address, so anyone could type another
-    one. The state proves the owner started here; the installation itself must
-    have been made or changed since then, which only its owner can do."""
-    started = project.github_state_at
-    project.github_state = project.github_state_at = None
-    response = await http.get(f"{API}/app/installations/{installation_id}",
-                              headers=HEADERS | {"Authorization": f"Bearer {app_jwt(settings)}"})
+
+def install_url(settings: Settings, state: str) -> str:
+    """Install the App (or change its repositories). With "Request user authorization
+    (OAuth) during installation" on, GitHub comes back to the callback with a code."""
+    return f"https://github.com/apps/{settings.github_app_slug}/installations/new?" + \
+        urllib.parse.urlencode({"state": state})
+
+
+def same(a: str, b: str) -> bool:
+    """Equal, compared in constant time (and safe for any characters a browser sends)."""
+    return hmac.compare_digest((a or "").encode(), (b or "").encode())
+
+
+def state_is_good(project: Project | None, nonce: str, now: dt.datetime | None = None) -> bool:
+    now = now or dt.datetime.now(dt.UTC)
+    return bool(project is not None and project.github_state and nonce and project.github_state_at is not None
+                and same(project.github_state, nonce) and now - project.github_state_at <= STATE_LIFE)
+
+
+class Refused(Exception):
+    """What GitHub said, in a sentence for the owner's page."""
+
+
+async def user_token(http: httpx.AsyncClient, settings: Settings, code: str) -> str:
+    """Swap the code GitHub sent back for a user access token. It is used during
+    this one request and never kept."""
+    response = await http.post(f"{OAUTH}/access_token", headers={"Accept": "application/json", "User-Agent": "Prodbat"},
+                               data={"client_id": settings.github_app_client_id,
+                                     "client_secret": settings.github_app_client_secret,
+                                     "code": code, "redirect_uri": callback_url(settings)})
+    try:
+        token = response.json().get("access_token") if response.status_code == 200 else None
+    except ValueError:
+        token = None
+    if not token:
+        raise Refused(NO_ANSWER)
+    return token
+
+
+async def _as_user(http: httpx.AsyncClient, token: str, path: str, **params) -> dict:
+    response = await http.get(f"{API}{path}", params=params or None,
+                              headers=HEADERS | {"Authorization": f"Bearer {token}"})
+    if slow_down_for(response) is not None:
+        raise Refused("GitHub asked us to slow down. Try again in a minute.")
     if response.status_code != 200:
-        return "GitHub didn't finish connecting. Try again."
-    found = response.json()
-    changed = max((dt.datetime.fromisoformat(found[k].replace("Z", "+00:00"))
-                   for k in ("created_at", "updated_at") if found.get(k)), default=None)
-    if started is None or changed is None or changed < started - dt.timedelta(minutes=2):
-        return NOT_NEW
+        raise Refused(NO_ANSWER)
+    return response.json()
+
+
+async def _pages(http: httpx.AsyncClient, token: str, path: str, key: str, pages: int) -> list[dict]:
+    found = []
+    for page in range(1, pages + 1):
+        some = (await _as_user(http, token, path, per_page=100, page=page)).get(key) or []
+        found += some
+        if len(some) < 100:
+            break
+    return found
+
+
+async def what_the_user_can_reach(http: httpx.AsyncClient, settings: Settings, token: str) -> dict:
+    """With the owner's own token: their login, and each installation of this App
+    they can use, with the repositories in it they can reach. GitHub decides both;
+    nothing the browser sent is taken on trust."""
+    login = (await _as_user(http, token, "/user")).get("login")
+    installations = []
+    for found in await _pages(http, token, "/user/installations", "installations", 5):
+        if str(found.get("app_id")) != str(settings.github_app_id) or \
+                (found.get("app_slug") and found["app_slug"] != settings.github_app_slug):
+            continue  # another App's installation
+        if not isinstance(found.get("id"), int) or len(installations) >= MAX_INSTALLATIONS:
+            continue
+        repos = await _pages(http, token, f"/user/installations/{found['id']}/repositories", "repositories", 3)
+        installations.append({
+            "id": found["id"], "account": (found.get("account") or {}).get("login") or "",
+            "repos": sorted(({"name": r["full_name"], "private": bool(r.get("private"))}
+                             for r in repos if r.get("full_name")), key=lambda r: r["name"].lower())[:300]})
+    return {"login": login, "installations": installations}
+
+
+def hold_choices(project: Project, reach: dict, now: dt.datetime | None = None) -> str:
+    """Keep what the owner can pick from for a few minutes. Returns the nonce the
+    picking browser must show again (in a cookie)."""
+    nonce = secrets.token_urlsafe(24)
+    project.github_pending = {"nonce": nonce, "at": (now or dt.datetime.now(dt.UTC)).isoformat(),
+                              "login": reach.get("login"), "installations": reach["installations"]}
+    return nonce
+
+
+def choices(project: Project, now: dt.datetime | None = None) -> dict | None:
+    """What the owner can pick from, while it lasts."""
+    pending = project.github_pending
+    if not pending:
+        return None
     try:
-        repos = await list_repos(http, settings, installation_id)
-    except (Gone, SlowDown, httpx.HTTPError):
-        return "GitHub didn't let us see the repositories. Try again."
-    if project.github_installation_id != installation_id:
+        at = dt.datetime.fromisoformat(pending["at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if (now or dt.datetime.now(dt.UTC)) - at > PICK_LIFE:
+        return None
+    return pending
+
+
+async def pick(db, project: Project, nonce: str, choice: str) -> bool:
+    """Connect the repository the owner chose, if GitHub listed it for them, from
+    the browser that went to GitHub."""
+    pending = choices(project)
+    if pending is None or not nonce or not pending.get("nonce") or not same(str(pending["nonce"]), nonce):
+        return False
+    installation_id, _, repo = choice.partition(":")
+    for installation in pending.get("installations") or []:
+        if str(installation["id"]) == installation_id and repo in [r["name"] for r in installation["repos"]]:
+            await connect(db, project, installation, repo, pending.get("login"))
+            return True
+    return False
+
+
+async def connect(db, project: Project, installation: dict, repo: str, login: str | None) -> None:
+    if project.github_installation_id != installation["id"] or project.github_repo != repo:
         await forget_issues(db, project)
-    project.github_installation_id = installation_id
-    project.github_account = (found.get("account") or {}).get("login")
-    project.github_repos = repos[:300]
-    names = [r["name"] for r in repos]
-    if project.github_repo not in names:
-        project.github_repo = names[0] if len(names) == 1 else None
+    project.github_installation_id = installation["id"]
+    project.github_account = installation.get("account") or None
+    project.github_repos = installation.get("repos") or []
+    project.github_repo = repo
+    project.github_login = login
+    project.github_pending = None
     project.github_error = project.github_note = None
-    return None
-
-
-async def refresh_repos(http: httpx.AsyncClient, settings: Settings, project: Project) -> str | None:
-    try:
-        project.github_repos = (await list_repos(http, settings, project.github_installation_id))[:300]
-    except Gone as exc:
-        project.github_error = str(exc)
-        return str(exc)
-    except (SlowDown, httpx.HTTPError):
-        return "GitHub didn't answer. Try again in a minute."
-    return None
 
 
 async def forget_issues(db, project: Project) -> None:
@@ -277,20 +362,12 @@ async def forget_issues(db, project: Project) -> None:
     project.github_note = None
 
 
-async def pick_repo(db, project: Project, name: str) -> bool:
-    if name not in [r["name"] for r in project.github_repos or []]:
-        return False
-    if name != project.github_repo:
-        await forget_issues(db, project)
-    project.github_repo = name
-    return True
-
-
 async def disconnect(db, project: Project) -> None:
     """Forget the connection. The app stays installed on GitHub until the owner removes it there."""
     await forget_issues(db, project)
     project.github_installation_id = project.github_account = project.github_repo = None
     project.github_state = project.github_state_at = project.github_error = project.github_note = None
+    project.github_login = project.github_pending = None
     project.github_repos = []
 
 

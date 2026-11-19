@@ -8,6 +8,7 @@ import hmac
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -90,7 +91,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
               "githubon": "GitHub is connected." + (f" Issues will open in {project.github_repo}." if project.github_repo
                                                     else " Pick the repository for issues below."),
               "githubno": "GitHub wasn't connected. Nothing changed.",
-              "githubrepo": f"Issues will open in {project.github_repo}.",
+              "githubpick": "GitHub showed us what your account can reach. Pick the repository for issues below.",
               "githubsaved": "Saved.",
               "githubtest": f"A test issue is on its way to {project.github_repo}. It is closed straight away.",
               "githuboff": "GitHub is disconnected. To remove the app from GitHub too, open your GitHub settings, "
@@ -114,7 +115,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         "telegram_links": telegram.links(project, settings) if telegram.can_connect(project, settings) else None,
         "webhook": webhooks.can_add(project, settings), "webhook_url": project.webhook_url,
         "webhook_error": project.webhook_error, "deliveries": deliveries,
-        "github": github.can_connect(project, settings), "gh": project,
+        "github": github.can_connect(project, settings), "gh": project, "github_choices": github.choices(project),
         "github_issues_on": github.can_post(project, settings),
         "can_test": bool(project.alert_email) or slack.can_post(project, settings) or bool(devices)
                     or telegram.can_post(project, settings) or webhooks.can_post(project, settings)
@@ -376,84 +377,150 @@ async def webhook_remove(request: Request, token: str) -> RedirectResponse:
 
 # ---- GitHub issues ----------------------------------------------------------------
 
+# The one-time state, and the nonce for picking a repository afterwards. Both are
+# random values bound to one project; neither is a GitHub token.
 GITHUB_COOKIE = "pb_github"
+GITHUB_PICK_COOKIE = "pb_github_pick"
+NOT_OURS = "This link from GitHub is not one we made, it was already used, or it was opened in another browser."
 
 
-@router.post("/d/{token}/github")
-async def github_start(request: Request, token: str) -> RedirectResponse:
-    """Off to GitHub to install the app; GitHub sends the owner back to /github/setup."""
+def _set_cookie(response, settings, name: str, value: str, life: dt.timedelta) -> None:
+    response.set_cookie(name, value, max_age=int(life.total_seconds()), httponly=True, samesite="lax",
+                        secure=settings.base.startswith("https://"))
+
+
+def _off_to_github(settings, url: str, state: str) -> RedirectResponse:
+    """Send the owner to GitHub with a new state. GitHub hands it back in the address,
+    and the cookie holds it too, so it must come back to the browser that left."""
+    response = RedirectResponse(url, status_code=303)
+    _set_cookie(response, settings, GITHUB_COOKIE, state, github.STATE_LIFE)
+    return response
+
+
+async def _start(request: Request, token: str, where) -> RedirectResponse:
     settings = request.app.state.settings
     async with request.app.state.sessions() as db:
         project = await project_by_token(request, db, token)
         if not github.can_connect(project, settings):
             raise HTTPException(403, "GitHub is not available for this site.")
         request.app.state.limiter.check("github", str(project.id), 10, 3600)
-        url = github.install_url(project, settings)
+        state = github.new_state(project)
         await db.commit()
-    response = RedirectResponse(url, status_code=303)
-    # GitHub hands the state back to the Setup URL, but that isn't promised in its
-    # docs, so the cookie carries it too.
-    response.set_cookie(GITHUB_COOKIE, f"{project.id.hex}.{project.github_state}", max_age=3600, httponly=True,
-                        samesite="lax", secure=settings.base.startswith("https://"))
-    return response
+    return _off_to_github(settings, where(settings, state), state)
+
+
+@router.post("/d/{token}/github")
+async def github_start(request: Request, token: str) -> RedirectResponse:
+    """Off to GitHub's "Authorize Prodbat" screen; GitHub sends the owner back to /github/callback."""
+    return await _start(request, token, github.authorize_url)
+
+
+@router.post("/d/{token}/github/install")
+async def github_install(request: Request, token: str) -> RedirectResponse:
+    """Off to GitHub to install the app, or give it another repository. GitHub comes back to /github/callback."""
+    return await _start(request, token, github.install_url)
 
 
 @router.get("/github/setup")
-async def github_setup(request: Request, installation_id: str = "", state: str = "",
-                       setup_action: str = "") -> RedirectResponse:
+async def github_setup(request: Request) -> RedirectResponse:
+    """An App set up before user authorization still sends owners here; carry on at the callback."""
+    query = request.url.query
+    return RedirectResponse("/github/callback" + (f"?{query}" if query else ""), status_code=303)
+
+
+@router.get("/github/callback")
+async def github_callback(request: Request, code: str = "", state: str = "", installation_id: str = "",
+                          error: str = "") -> RedirectResponse:
+    """GitHub sends the owner back here after "Authorize Prodbat", and after installing
+    the app. The installation they connect must be one GitHub lists for their own
+    account; the id in the address is only a hint."""
     settings = request.app.state.settings
     if not settings.github_configured:
         raise HTTPException(404, "Not Found")
-    state = state or request.cookies.get(GITHUB_COOKIE, "")
-    project_hex, _, nonce = state.partition(".")
+    # The state must come back to the browser that left (the cookie); if GitHub
+    # also hands it back in the address, the two must agree.
+    cookie = request.cookies.get(GITHUB_COOKIE, "")
+    if not cookie or (state and not github.same(state, cookie)):
+        raise HTTPException(400, NOT_OURS)
+    project_hex, _, nonce = cookie.partition(".")
     try:
         project_id = uuid.UUID(hex=project_hex)
     except ValueError:
-        raise HTTPException(400, "This link from GitHub is not one we made.")
+        raise HTTPException(400, NOT_OURS)
+    http = request.app.state.http
     async with request.app.state.sessions() as db:
         project = await db.get(Project, project_id)
-        if project is None or not project.github_state or not nonce or project.github_state_at is None \
-                or not hmac.compare_digest(project.github_state, nonce) \
-                or dt.datetime.now(dt.UTC) - project.github_state_at > github.STATE_LIFE:
-            raise HTTPException(400, "This link from GitHub is not one we made, or it was already used.")
+        if not github.state_is_good(project, nonce):
+            raise HTTPException(400, NOT_OURS)
         guard = request.app.state.page_guard
         if guard is not None:
             await guard(request, project)
         token = project.page_token
-        if installation_id.isdigit():
-            problem = await github.finish_connecting(db, request.app.state.http, settings, project,
-                                                    int(installation_id))
+        project.github_state = project.github_state_at = None  # it works once
+        problem, sent, pick_nonce = None, "githubon", None
+        if not github.can_connect(project, settings):
+            problem = "GitHub is not available for this site."
+        elif error:
+            sent = "githubno"  # they pressed Cancel on GitHub
+        elif not code:
+            # Back from installing without authorizing (an App without user
+            # authorization during installation): ask GitHub who this is now.
+            state = github.new_state(project)
+            await db.commit()
+            return _off_to_github(settings, github.authorize_url(settings, state), state)
         else:
-            problem = "GitHub didn't finish connecting. Nothing changed."
-        project.github_state = project.github_state_at = None
+            try:
+                user_token = await github.user_token(http, settings, code)
+                reach = await github.what_the_user_can_reach(http, settings, user_token)
+            except github.Refused as exc:
+                problem = str(exc)
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                problem = github.NO_ANSWER
+            finally:
+                user_token = None  # used for this request only, never kept
+            if problem is None:
+                found = reach["installations"]
+                if installation_id:
+                    found = [i for i in found if str(i["id"]) == installation_id]
+                    if not found:
+                        problem = github.NOT_YOURS
+                elif not found:
+                    # Nothing installed that this GitHub account can use: install it first.
+                    state = github.new_state(project)
+                    await db.commit()
+                    return _off_to_github(settings, github.install_url(settings, state), state)
+            if problem is None:
+                reach["installations"] = found
+                every = [(i, r["name"]) for i in found for r in i["repos"]]
+                if len(every) == 1:
+                    await github.connect(db, project, every[0][0], every[0][1], reach.get("login"))
+                else:
+                    pick_nonce = github.hold_choices(project, reach)
+                    sent = "githubpick"
         if problem:
-            project.github_note = problem
+            project.github_note, sent = problem, "githubno"
         await db.commit()
-    response = RedirectResponse(f"/d/{token}?sent={'githubno' if problem else 'githubon'}#github", status_code=303)
+    response = RedirectResponse(f"/d/{token}?sent={sent}#github", status_code=303)
     response.delete_cookie(GITHUB_COOKIE)
+    if pick_nonce:
+        _set_cookie(response, settings, GITHUB_PICK_COOKIE, f"{project_id.hex}.{pick_nonce}", github.PICK_LIFE)
     return response
 
 
-@router.post("/d/{token}/github/repo")
-async def github_repo(request: Request, token: str, repo: str = Form(...)) -> RedirectResponse:
+@router.post("/d/{token}/github/pick")
+async def github_pick(request: Request, token: str, choice: str = Form(...)) -> RedirectResponse:
+    """Connect the repository picked from what GitHub listed for the owner, from the browser that went to GitHub."""
+    project_hex, _, nonce = request.cookies.get(GITHUB_PICK_COOKIE, "").partition(".")
     async with request.app.state.sessions() as db:
         project = await project_by_token(request, db, token)
-        if not await github.pick_repo(db, project, repo):
-            raise HTTPException(400, "Prodbat's app can't see that repository. Refresh the list or connect again.")
+        if not github.can_connect(project, request.app.state.settings) or project_hex != project.id.hex \
+                or not await github.pick(db, project, nonce, choice):
+            raise HTTPException(400, "That repository wasn't in the list GitHub gave, or the list ran out "
+                                     "(it lasts 10 minutes). Connect GitHub again.")
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=githubrepo#github", status_code=303)
-
-
-@router.post("/d/{token}/github/refresh")
-async def github_refresh(request: Request, token: str) -> RedirectResponse:
-    async with request.app.state.sessions() as db:
-        project = await project_by_token(request, db, token)
-        if not project.github_installation_id:
-            raise HTTPException(400, "GitHub is not connected.")
-        request.app.state.limiter.check("github", str(project.id), 10, 3600)
-        await github.refresh_repos(request.app.state.http, request.app.state.settings, project)
-        await db.commit()
-    return RedirectResponse(f"/d/{token}#github", status_code=303)
+    response = RedirectResponse(f"/d/{token}?sent=githubon#github", status_code=303)
+    response.delete_cookie(GITHUB_PICK_COOKIE)
+    return response
 
 
 @router.post("/d/{token}/github/settings")

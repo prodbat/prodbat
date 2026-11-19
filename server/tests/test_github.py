@@ -23,21 +23,46 @@ PEM = KEY.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.
                         serialization.NoEncryption()).decode()
 # As it would sit in one line of an environment variable.
 ISSUING = SETTINGS.model_copy(update={"github_app_id": "12345", "github_app_slug": "prodbat-test",
-                                      "github_app_private_key": PEM.replace("\n", "\\n")})
+                                      "github_app_private_key": PEM.replace("\n", "\\n"),
+                                      "github_app_client_id": "Iv1.client", "github_app_client_secret": "shh-secret"})
 REPO = "ann/shop"
+USER_TOKEN = "ghu_ann_user_token_never_kept"
+
+
+def installation(id, account="ann", app_id=12345, slug="prodbat-test"):
+    return {"id": id, "app_id": app_id, "app_slug": slug, "account": {"login": account}}
 
 
 class GitHub:
-    """A stand-in for api.github.com. `answers[(method, path)]` replaces the next answers to that call."""
+    """A stand-in for api.github.com and GitHub's OAuth. `answers[(method, path)]` replaces the next answers to that call.
+
+    `codes` maps a code GitHub hands back to the user token it is worth; `users`
+    maps a user token to that user's login, installations and reachable repositories."""
 
     def __init__(self):
         self.seen = []
         self.answers = {}
         self.number = 0
-        self.installed_at = dt.datetime.now(dt.UTC)
-        self.repos = [{"full_name": REPO, "private": True}, {"full_name": "ann/blog", "private": False}]
+        self.codes = {"good-code": USER_TOKEN}
+        # Ann can use installation 77 of this app (two of its repositories; it has a third
+        # she can't reach) and an installation of another app, which must be ignored.
+        self.users = {USER_TOKEN: {"login": "ann", "installations": [installation(77), installation(55, app_id=999,
+                                                                                                    slug="other")],
+                                   "repos": {77: [{"full_name": REPO, "private": True},
+                                                  {"full_name": "ann/blog", "private": False}],
+                                             55: [{"full_name": "ann/elsewhere"}]}}}
+
+    def _user(self, request):
+        return self.users.get(request.headers.get("authorization", "").removeprefix("Bearer "))
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == "github.com" and request.url.path == "/login/oauth/access_token":
+            self.seen.append(request)
+            form = urllib.parse.parse_qs(request.content.decode())
+            token = self.codes.pop(form.get("code", [""])[0], None)  # a code works once
+            if form.get("client_secret") != ["shh-secret"] or token is None:
+                return httpx.Response(200, json={"error": "bad_verification_code"})
+            return httpx.Response(200, json={"access_token": token, "token_type": "bearer"})
         if request.url.host != "api.github.com":
             return httpx.Response(200, text="<html>the site</html>")  # the founder's site, loading fine
         self.seen.append(request)
@@ -46,15 +71,22 @@ class GitHub:
             status, body, headers = self.answers[key].pop(0)
             return httpx.Response(status, json=body, headers=headers)
         path = request.url.path
+        if path == "/user" or path.startswith("/user/"):
+            user = self._user(request)
+            if user is None:
+                return httpx.Response(401, json={"message": "Bad credentials"})
+            if path == "/user":
+                return httpx.Response(200, json={"login": user["login"]})
+            if path == "/user/installations":
+                return httpx.Response(200, json={"total_count": len(user["installations"]),
+                                                 "installations": user["installations"]})
+            number = int(path.split("/")[3])
+            if number not in [i["id"] for i in user["installations"]]:
+                return httpx.Response(404, json={"message": "Not Found"})
+            return httpx.Response(200, json={"repositories": user["repos"].get(number, [])})
         if path.endswith("/access_tokens"):
             expires = (dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
             return httpx.Response(201, json={"token": "ghs_test", "expires_at": expires})
-        if path.startswith("/app/installations/"):
-            return httpx.Response(200, json={"id": 77, "account": {"login": "ann"},
-                                             "created_at": self.installed_at.isoformat(),
-                                             "updated_at": self.installed_at.isoformat()})
-        if path == "/installation/repositories":
-            return httpx.Response(200, json={"total_count": len(self.repos), "repositories": self.repos})
         if path.endswith("/labels"):
             return httpx.Response(201, json={"name": "prodbat"})
         if path.endswith("/issues") and request.method == "POST":
@@ -150,57 +182,221 @@ def test_installation_tokens_are_kept_until_shortly_before_they_run_out(db, proj
     assert len([r for r in gh.seen if r.url.path.endswith("/access_tokens")]) == 2
 
 
-def test_connecting_checks_the_state_and_picking_a_repo(issuing, client, db, project, gh):
-    assert "Connect GitHub" not in page_text(client, project), "not offered when the server has no app"
-    assert "Connect GitHub" in page_text(issuing, project)
-
-    went = issuing.post(f"/d/{project.page_token}/github")
+def start(issuing, project, path="github"):
+    """Press the button. The test client is http and the cookie is secure, so it is carried by hand."""
+    went = issuing.post(f"/d/{project.page_token}/{path}")
+    assert went.status_code == 303
+    issuing.cookies.clear()
+    put(issuing, "pb_github", went.cookies["pb_github"])
     url = urllib.parse.urlsplit(went.headers["location"])
-    assert (url.netloc, url.path) == ("github.com", "/apps/prodbat-test/installations/new")
-    state = urllib.parse.parse_qs(url.query)["state"][0]
-    db.refresh(project)
-    assert state == f"{project.id.hex}.{project.github_state}"
+    return url, urllib.parse.parse_qs(url.query)
 
-    assert issuing.get("/github/setup", params={"installation_id": 77, "state": state + "x"}).status_code == 400
-    assert issuing.get("/github/setup", params={"installation_id": 77, "state": "nonsense"}).status_code == 400
-    back = issuing.get("/github/setup", params={"installation_id": 77, "state": state, "setup_action": "install"})
-    assert back.headers["location"] == f"/d/{project.page_token}?sent=githubon#github"
+
+def put(client, name, value):
+    client.cookies.delete(name)
+    if value is not None:
+        client.cookies.set(name, value)
+
+
+def back_from_github(issuing, **params):
+    back = issuing.get("/github/callback", params=params)
+    put(issuing, "pb_github", None)
+    if "pb_github_pick" in back.cookies:
+        put(issuing, "pb_github_pick", back.cookies["pb_github_pick"])
+    return back
+
+
+def nothing_holds_the_user_token(db, *responses):
+    db.expire_all()
+    for row in db.scalars(select(Project)).all():
+        assert USER_TOKEN not in repr({c.key: getattr(row, c.key) for c in Project.__table__.columns})
+    for response in responses:
+        assert USER_TOKEN not in str(response.headers.get_list("set-cookie"))
+        assert USER_TOKEN not in response.headers.get("location", "")
+
+
+def test_github_is_offered_only_with_all_five_settings(client, db, project):
+    assert "Connect GitHub" not in page_text(client, project), "not offered when the server has no app"
+    for missing in ("github_app_id", "github_app_slug", "github_app_private_key", "github_app_client_id",
+                    "github_app_client_secret"):
+        settings = ISSUING.model_copy(update={missing: None})
+        assert not settings.github_configured
+        app = create_app(settings, http=httpx.AsyncClient(transport=httpx.MockTransport(GitHub())))
+        with TestClient(app, headers={"user-agent": BROWSER}, follow_redirects=False) as partial:
+            assert "Connect GitHub" not in page_text(partial, project), missing
+            assert partial.post(f"/d/{project.page_token}/github").status_code == 403
+            assert partial.get("/github/callback").status_code == 404
+
+
+def test_connecting_authorizes_the_user_and_lists_only_what_they_can_reach(issuing, db, project, gh):
+    assert "Connect GitHub" in page_text(issuing, project)
+    url, query = start(issuing, project)
+    assert (url.netloc, url.path) == ("github.com", "/login/oauth/authorize")
+    assert query["client_id"] == ["Iv1.client"] and query["redirect_uri"] == ["https://pb.example/github/callback"]
+    state = query["state"][0]
     db.refresh(project)
-    assert (project.github_installation_id, project.github_account, project.github_state) == (77, "ann", None)
-    assert project.github_repo is None, "two repositories: the owner picks"
-    assert issuing.get("/github/setup", params={"installation_id": 77, "state": state}).status_code == 400, \
-        "a state works once"
+    assert state == f"{project.id.hex}.{project.github_state}"  # the cookie holds the same
+
+    assert back_from_github(issuing, code="good-code", state=state + "x").status_code == 400, "state must match"
+    assert back_from_github(issuing, code="good-code", state=state).status_code == 400, \
+        "the state must come back to the browser that left"
+    put(issuing, "pb_github", state)
+    back = back_from_github(issuing, code="good-code", state=state)
+    assert back.headers["location"] == f"/d/{project.page_token}?sent=githubpick#github"
+    exchange = next(r for r in gh.seen if r.url.path == "/login/oauth/access_token")
+    assert exchange.headers["accept"] == "application/json"
+    assert urllib.parse.parse_qs(exchange.content.decode())["client_id"] == ["Iv1.client"]
+    assert all(r.headers["authorization"] == f"Bearer {USER_TOKEN}" for r in gh.seen if r.url.path.startswith("/user"))
+    assert not any(r.url.path.startswith("/app/") for r in gh.seen), "nothing is looked up by an id from the address"
+    db.refresh(project)
+    assert project.github_state is None and project.github_installation_id is None
+    assert [i["id"] for i in project.github_pending["installations"]] == [77], "another app's installation is left out"
+    nothing_holds_the_user_token(db, back)
+
+    put(issuing, "pb_github", state)
+    assert back_from_github(issuing, code="good-code", state=state).status_code == 400, "a state works once"
 
     page = page_text(issuing, project)
-    assert "Pick the repository" in page and "ann/blog (public)" in page
-    assert issuing.post(f"/d/{project.page_token}/github/repo", data={"repo": "someone/else"}).status_code == 400
-    issuing.post(f"/d/{project.page_token}/github/repo", data={"repo": REPO})
+    assert "Pick the repository" in page and "@ann" in page and "ann/blog (public)" in page
+    assert "ann/elsewhere" not in page
+    pick = f"/d/{project.page_token}/github/pick"
+    assert issuing.post(pick, data={"choice": "55:ann/elsewhere"}).status_code == 400, "another app's installation"
+    assert issuing.post(pick, data={"choice": "77:ann/secret"}).status_code == 400, "a repository she can't reach"
+    assert issuing.post(pick, data={"choice": "4242:ann/shop"}).status_code == 400, "a made-up installation"
+    nonce = back.cookies["pb_github_pick"]
+    put(issuing, "pb_github_pick", None)
+    assert issuing.post(pick, data={"choice": f"77:{REPO}"}).status_code == 400, "only the browser that went to GitHub"
+    put(issuing, "pb_github_pick", nonce)
+    picked = issuing.post(pick, data={"choice": f"77:{REPO}"})
+    assert picked.headers["location"] == f"/d/{project.page_token}?sent=githubon#github"
     db.refresh(project)
-    assert project.github_repo == REPO
-    assert f"opens an issue in {REPO}" in page_text(issuing, project)
+    assert (project.github_installation_id, project.github_repo, project.github_account, project.github_login) == \
+        (77, REPO, "ann", "ann")
+    assert project.github_pending is None
+    assert issuing.post(pick, data={"choice": f"77:{REPO}"}).status_code == 400, "the list works once"
+    page = page_text(issuing, project)
+    assert f"opens an issue in {REPO}" in page and "Connected by @ann" in page
+    nothing_holds_the_user_token(db, picked)
 
     issuing.post(f"/d/{project.page_token}/github/remove")
     db.refresh(project)
     assert project.github_installation_id is None and project.github_repo is None and project.github_repos == []
+    assert project.github_login is None
 
 
-def test_the_state_can_come_back_in_the_cookie_and_old_installations_are_refused(issuing, db, project, gh):
-    went = issuing.post(f"/d/{project.page_token}/github")
-    issuing.cookies.set("pb_github", went.cookies["pb_github"])  # the test client is http, the cookie is secure
-    gh.installed_at = dt.datetime.now(dt.UTC) - dt.timedelta(days=30)
-    back = issuing.get("/github/setup", params={"installation_id": 999})  # no state: the cookie has it
+def test_a_spoofed_installation_id_is_refused(issuing, db, project, gh):
+    # Someone else's installation, typed into the address on the way back.
+    _, query = start(issuing, project)
+    back = back_from_github(issuing, code="good-code", state=query["state"][0], installation_id="4242",
+                            setup_action="install")
     assert back.headers["location"].endswith("?sent=githubno#github")
     db.refresh(project)
-    assert project.github_installation_id is None and project.github_note == github.NOT_NEW
-    assert "didn't confirm that installation was just made" in page_text(issuing, project)
+    assert project.github_installation_id is None and project.github_pending is None
+    assert project.github_note == github.NOT_YOURS
+    assert "didn't list that installation for your GitHub account" in page_text(issuing, project)
 
-    gh.installed_at = dt.datetime.now(dt.UTC)
-    gh.repos = gh.repos[:1]
-    went = issuing.post(f"/d/{project.page_token}/github")
-    issuing.cookies.set("pb_github", went.cookies["pb_github"])
-    issuing.get("/github/setup", params={"installation_id": 77})
+    # Another app's installation that the user can reach is no better.
+    gh.codes["again"] = USER_TOKEN
+    _, query = start(issuing, project)
+    back_from_github(issuing, code="again", state=query["state"][0], installation_id="55")
     db.refresh(project)
-    assert project.github_repo == REPO, "the only repository is picked"
+    assert project.github_installation_id is None and project.github_note == github.NOT_YOURS
+
+
+def test_a_bad_code_or_cancel_changes_nothing(issuing, db, project, gh):
+    connect(db, project)
+    _, query = start(issuing, project)
+    back = back_from_github(issuing, code="made-up", state=query["state"][0])
+    assert back.headers["location"].endswith("?sent=githubno#github")
+    db.refresh(project)
+    assert (project.github_installation_id, project.github_repo) == (77, REPO)
+    assert project.github_note == github.NO_ANSWER
+
+    _, query = start(issuing, project)
+    back = back_from_github(issuing, error="access_denied", state=query["state"][0])
+    assert back.headers["location"].endswith("?sent=githubno#github")
+    db.refresh(project)
+    assert project.github_state is None and project.github_installation_id == 77
+
+
+def test_the_state_is_bound_to_its_project_and_runs_out(issuing, db, project, gh):
+    other = Project(domain="other.com", key="pb_other", secret_hash="x")
+    db.add(other)
+    db.commit()
+    _, query = start(issuing, project)
+    db.refresh(project)
+    put(issuing, "pb_github", f"{other.id.hex}.{project.github_state}")
+    assert back_from_github(issuing, code="good-code").status_code == 400, "a state for another project"
+    put(issuing, "pb_github", query["state"][0])
+    assert back_from_github(issuing, code="good-code", state="nonsense").status_code == 400
+
+    _, query = start(issuing, project)
+    project.github_state_at = dt.datetime.now(dt.UTC) - github.STATE_LIFE - dt.timedelta(minutes=1)
+    db.commit()
+    assert back_from_github(issuing, code="good-code", state=query["state"][0]).status_code == 400, "it runs out"
+
+
+def test_the_pick_list_runs_out(issuing, db, project, gh):
+    _, query = start(issuing, project)
+    back_from_github(issuing, code="good-code", state=query["state"][0])
+    db.refresh(project)
+    project.github_pending = project.github_pending | {
+        "at": (dt.datetime.now(dt.UTC) - github.PICK_LIFE - dt.timedelta(minutes=1)).isoformat()}
+    db.commit()
+    assert "Pick the repository" not in page_text(issuing, project)
+    assert issuing.post(f"/d/{project.page_token}/github/pick", data={"choice": f"77:{REPO}"}).status_code == 400
+
+
+def test_with_nothing_installed_it_installs_and_the_way_back_completes(issuing, db, project, gh):
+    gh.users[USER_TOKEN]["installations"] = []
+    _, query = start(issuing, project)
+    back = back_from_github(issuing, code="good-code", state=query["state"][0])
+    url = urllib.parse.urlsplit(back.headers["location"])
+    assert (url.netloc, url.path) == ("github.com", "/apps/prodbat-test/installations/new")
+    state = urllib.parse.parse_qs(url.query)["state"][0]
+    db.refresh(project)
+    assert state == f"{project.id.hex}.{project.github_state}" != query["state"][0], "a new state for the install"
+    assert back.cookies["pb_github"] == state
+    nothing_holds_the_user_token(db, back)
+
+    # She installs it on one repository. With user authorization during installation,
+    # GitHub comes back with a code and the installation's id (and, maybe, no state).
+    gh.users[USER_TOKEN]["installations"] = [installation(77)]
+    gh.users[USER_TOKEN]["repos"][77] = [{"full_name": REPO, "private": True}]
+    gh.codes["after-install"] = USER_TOKEN
+    put(issuing, "pb_github", back.cookies["pb_github"])
+    done =back_from_github(issuing, code="after-install", installation_id="77", setup_action="install")
+    assert done.headers["location"] == f"/d/{project.page_token}?sent=githubon#github"
+    db.refresh(project)
+    assert (project.github_installation_id, project.github_repo, project.github_login) == (77, REPO, "ann"), \
+        "the only repository is picked"
+    nothing_holds_the_user_token(db, done)
+
+
+def test_an_installation_already_there_can_be_used_for_another_site(issuing, db, project, gh):
+    # The app was installed long ago (for another site): nothing about when it was made matters.
+    gh.users[USER_TOKEN]["installations"] = [installation(77), installation(78, account="ann-co")]
+    gh.users[USER_TOKEN]["repos"][78] = [{"full_name": "ann-co/api", "private": True}]
+    _, query = start(issuing, project)
+    back_from_github(issuing, code="good-code", state=query["state"][0])
+    page = page_text(issuing, project)
+    assert "ann-co/api" in page and REPO in page
+    issuing.post(f"/d/{project.page_token}/github/pick", data={"choice": "78:ann-co/api"})
+    db.refresh(project)
+    assert (project.github_installation_id, project.github_repo, project.github_account) == (78, "ann-co/api", "ann-co")
+
+
+def test_the_old_setup_address_asks_github_who_it_is(issuing, db, project, gh):
+    """An App still set up with a Setup URL and no user authorization comes back without a code."""
+    _, query = start(issuing, project, "github/install")
+    went = issuing.get("/github/setup", params={"installation_id": 77, "setup_action": "install",
+                                                "state": query["state"][0]})
+    assert went.headers["location"].startswith("/github/callback?")
+    back = issuing.get(went.headers["location"])
+    url = urllib.parse.urlsplit(back.headers["location"])
+    assert (url.netloc, url.path) == ("github.com", "/login/oauth/authorize")
+    db.refresh(project)
+    assert project.github_installation_id is None, "an id alone connects nothing"
 
 
 def test_a_broken_problem_opens_one_labelled_issue_with_task_mention_and_escaped_evidence(db, project, gh):
@@ -392,4 +588,4 @@ def test_settings_and_plan_switch(issuing, db, project):
     assert issuing.post(f"/d/{project.page_token}/github").status_code == 403
     run(_report, db)
     assert posts(db) == []
-    assert issuing.get("/github/setup").status_code == 400
+    assert issuing.get("/github/callback").status_code == 400

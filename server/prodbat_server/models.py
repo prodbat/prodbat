@@ -151,9 +151,15 @@ class Project(Base):
     github_account: Mapped[str | None] = mapped_column(Text)  # the user or organisation it is installed on
     github_repos: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     github_repo: Mapped[str | None] = mapped_column(Text)  # "ann/shop"
-    # Random value sent to GitHub when installing, checked when GitHub sends the owner back.
+    # Random value sent to GitHub when connecting, checked when GitHub sends the owner back.
     github_state: Mapped[str | None] = mapped_column(Text)
     github_state_at: Mapped[dt.datetime | None] = timestamp()
+    # The GitHub login that connected it, as GitHub told us after "Authorize Prodbat".
+    github_login: Mapped[str | None] = mapped_column(Text)
+    # For ten minutes after GitHub sends the owner back: what their GitHub account
+    # can reach ({"nonce", "at", "login", "installations": [{"id", "account",
+    # "repos"}]}), so they can pick a repository. Never a token.
+    github_pending: Mapped[dict | None] = mapped_column(JSON)
     # Also open issues for "Needs a look", not only "Broken".
     github_look: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # The owner's own line at the end of each issue ("@claude please fix this"), and
