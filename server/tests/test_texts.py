@@ -92,3 +92,15 @@ def test_the_worker_sends_texts_through_twilio(db, project):
     assert str(seen[0].url) == "https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json"
     assert form == {"To": "+15551234567", "Body": "Prodbat. Broken: test", "From": "+15550001111"}
     assert texts(db)[0].sent_at is not None
+
+
+def test_texts_can_be_limited_to_some_countries(db, site, project):
+    us_only = TEXTING.model_copy(update={"text_countries": "+1"})
+    with TestClient(create_app(us_only, http=http_client(site)), headers={"user-agent": BROWSER}) as client:
+        base = f"/d/{project.page_token}"
+        assert "US numbers (+1)" in client.get(base).text
+        refused = client.post(f"{base}/sms", data={"number": "+44 7700 900123"}).text
+        assert "Texts can only go to US numbers (+1)" in refused
+        assert texts(db) == []
+        client.post(f"{base}/sms", data={"number": "+1 555 123 4567"})
+        assert texts(db)[-1].to == "+15551234567"

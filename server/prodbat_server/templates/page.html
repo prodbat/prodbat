@@ -264,7 +264,7 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 <button class="primary">Turn texts on</button>
 </form>
 {% else %}
-<p class="muted">Get a text when customers are affected: checkout or sign-in failing, or the site down. Only "Broken:" alerts are texted.</p>
+<p class="muted">Get a text when customers are affected: checkout or sign-in failing, or the site down. Only "Broken:" alerts are texted.{% if text_where %} Texts can only go to {{ text_where }} for now.{% endif %}</p>
 <form method="post" action="/d/{{ token }}/sms" class="actions">
 <input name="number" type="tel" autocomplete="tel" required placeholder="+1 555 123 4567" aria-label="Phone number with country code">
 <button>Text me a code</button>

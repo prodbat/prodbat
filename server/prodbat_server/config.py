@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     twilio_auth_token: str | None = None
     # The number texts come from (+15551234567), or a Messaging Service id (MG...).
     twilio_from: str | None = None
+    # Country codes texts may go to, comma separated ("+1" for the US). Empty:
+    # any country. Texting abroad costs more and needs its own registration.
+    text_countries: str = ""
+
+    @property
+    def text_prefixes(self) -> list[str]:
+        return [p.strip() for p in self.text_countries.split(",") if p.strip()]
 
     @property
     def texts_configured(self) -> bool:

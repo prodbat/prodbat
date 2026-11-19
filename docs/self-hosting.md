@@ -43,6 +43,7 @@ All settings are environment variables. `.env.example` lists them with what each
 | `PRODBAT_LOG_KEEP_DAYS` | Days of log lines to keep (7). A single site can be given its own number in the `log_keep_days` column of `projects` |
 | `PRODBAT_LOG_LINES_PER_MINUTE` | Log lines one site may send a minute before the rest are dropped (3000) |
 | `PRODBAT_TWILIO_ACCOUNT_SID`, `_AUTH_TOKEN`, `_FROM` | Text messages when customers are affected; without them, texts aren't offered |
+| `PRODBAT_TEXT_COUNTRIES` | Optional: country codes texts may go to, such as `+1`. Empty allows any country |
 | `PRODBAT_SLACK_CLIENT_ID`, `_CLIENT_SECRET` | Alerts in Slack; without them, Slack isn't offered. See below |
 | `PRODBAT_WATCHER_URL` | A URL requested once a minute, so something outside can notice if this server stops |
 

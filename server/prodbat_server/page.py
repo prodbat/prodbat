@@ -37,6 +37,14 @@ async def project_by_token(request: Request, db, token: str) -> Project:
     return project
 
 
+
+def text_where(settings) -> str:
+    """Which numbers can be texted, in words: "US numbers (+1)"."""
+    prefixes = settings.text_prefixes
+    if prefixes == ["+1"]:
+        return "US numbers (+1)"
+    return "numbers starting " + " or ".join(prefixes)
+
 @router.get("/d/{token}", response_class=HTMLResponse)
 async def page(request: Request, token: str, sent: str | None = None) -> HTMLResponse:
     settings = request.app.state.settings
@@ -57,6 +65,8 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
               "smswrong": "That code didn't match, or it ran out. Codes last 10 minutes.",
               "badnumber": "Write the number with its country code, like +1 555 123 4567.",
               "smsoff": "Texts are off.",
+              "textcountry": f"Texts can only go to {text_where(settings)} for now. Alerts still come by email "
+                             "and in Slack.",
               "slackon": f"Slack is connected. We posted a hello in {project.slack_channel}.",
               "slackno": "Slack wasn't connected. Nothing changed.",
               "slackoff": "Slack is disconnected. Alerts still go by email."}.get(sent or "")
@@ -67,7 +77,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         "unfinished": [s for s in setup if not s["done"] and s.get("later")],
         "paused": project.paused_at is not None, "checks": checks,
         "since": f"{project.created_at:%-d %b}", "stalled": stalled(project),
-        "texts": can_text(project, settings), "sms_to": project.sms_to, "sms_pending": project.sms_pending,
+        "texts": can_text(project, settings), "text_where": text_where(settings) if settings.text_prefixes else None, "sms_to": project.sms_to, "sms_pending": project.sms_pending,
         "needs_timezone": not project.timezone,
         "slack": settings.slack_configured and project.slack_enabled, "slack_channel": project.slack_channel,
         "slack_connected": bool(project.slack_token), "slack_team": project.slack_team,
@@ -142,6 +152,8 @@ async def sms_start(request: Request, token: str, number: str = Form(...)) -> Re
         clean = normalize_number(number)
         if clean is None:
             return RedirectResponse(f"/d/{token}?sent=badnumber#texts", status_code=303)
+        if settings.text_prefixes and not clean.startswith(tuple(settings.text_prefixes)):
+            return RedirectResponse(f"/d/{token}?sent=textcountry#texts", status_code=303)
         request.app.state.limiter.check("sms", str(project.id), 3, 3600)
         start_confirming(db, project, settings, clean)
         await db.commit()
