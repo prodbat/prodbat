@@ -2,6 +2,7 @@
 site, gathered once."""
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 
 from sqlalchemy import select, text
@@ -83,6 +84,9 @@ class Summary:
 
 
 def past_tense(incident: Incident) -> str:
+    reason = (incident.data or {}).get("dismissed_by_agent")
+    if reason:
+        return f"Your coding agent dismissed “{incident.title}”: {reason}"
     duration = lasted((incident.ended_at - incident.started_at).total_seconds())
     if incident.kind == "down":
         return f"Your site did not load for {duration}."
@@ -95,19 +99,116 @@ def past_tense(incident: Incident) -> str:
     return f"{incident.title.replace(' is failing', ' was failing')} for {duration}."
 
 
-async def evidence_for(db: AsyncSession, project: Project, incident: Incident) -> list[str]:
-    """The raw facts a coding agent needs, as lines of text, followed by
-    whatever the app logged at warning or error level around that time."""
+# Log lines attached to an alert: at most this many, from this window around its start.
+LOG_LINES = 15
+LOG_BEFORE, LOG_AFTER = dt.timedelta(minutes=5), dt.timedelta(minutes=10)
+# A kind of line logged in this many separate hours of the day before is routine, not evidence.
+ROUTINE_HOURS = 6
+SHAPE = re.compile(r"0x[0-9a-f]+|[0-9a-f]{8}-[0-9a-f-]{27,}|\d+", re.I)
+
+
+def shape(message: str) -> str:
+    """A log line with its numbers and ids taken out, so repeats of one kind of line match."""
+    return " ".join(SHAPE.sub("#", message.lower()).split())[:200]
+
+
+def clues(incident: Incident) -> list[str]:
+    """Words a related log line would contain: the route, the error's kind."""
+    d = incident.data or {}
+    found = []
+    if incident.kind == "route":
+        found.append(str(d.get("route") or ""))
+    elif incident.kind == "server":
+        route = str(d.get("route") or "")
+        found += [route.split(" ", 1)[-1], str(d.get("kind") or "")]
+    elif incident.kind in ("job", "queue"):
+        found.append(str(d.get("name") or incident.key))
+    return [c.lower() for c in found if len(c) >= 3 and c != "/"]
+
+
+async def nearby_logs(db: AsyncSession, project: Project, incident: Incident) -> list[str]:
+    """Warnings and errors logged around the time a problem started: lines that
+    name its route or error first, repeats folded into one line, and kinds of
+    line that are logged all day left out."""
     from .api import format_line
 
-    facts = await facts_for(db, project, incident)
-    nearby = (await db.scalars(select(LogLine).where(
+    start = incident.started_at - LOG_BEFORE
+    lines = (await db.scalars(select(LogLine).where(
         LogLine.project_id == project.id, LogLine.level.in_(("warning", "error")),
-        LogLine.ts >= incident.started_at - dt.timedelta(minutes=5),
-        LogLine.ts <= incident.started_at + dt.timedelta(minutes=10)).order_by(LogLine.ts).limit(15))).all()
-    if nearby:
-        facts += ["Logged around that time:", *[format_line(line) for line in nearby]]
+        LogLine.ts >= start, LogLine.ts <= incident.started_at + LOG_AFTER)
+        .order_by(LogLine.ts).limit(500))).all()
+    if not lines:
+        return []
+    hours: dict[str, set] = {}
+    for message, hour in await db.execute(text("""
+            select message, date_trunc('hour', ts) from log_lines
+            where project_id = :p and level in ('warning', 'error') and ts >= :since and ts < :start
+            order by ts desc limit 5000"""), {"p": project.id, "since": start - DAY, "start": start}):
+        hours.setdefault(shape(message), set()).add(hour)
+    terms = clues(incident)
+    groups: dict[str, list[LogLine]] = {}
+    for line in lines:
+        groups.setdefault(shape(line.message), []).append(line)
+    related, other, routine = [], [], 0
+    for key, same in groups.items():
+        named = any(term in same[0].message.lower() for term in terms)
+        if not named and len(hours.get(key, ())) >= ROUTINE_HOURS:
+            routine += 1
+            continue
+        text_ = format_line(same[0]) + (f"  (and {len(same) - 1} more like it)" if len(same) > 1 else "")
+        (related if named else other).append(text_)
+    shown = (related + other)[:LOG_LINES]
+    if routine:
+        shown.append(f"({plural(routine, 'kind')} of line left out: {'it is' if routine == 1 else 'they are'} "
+                     "logged all day, not only around this.)")
+    return shown if related or other else []
+
+
+async def evidence_for(db: AsyncSession, project: Project, incident: Incident) -> list[str]:
+    """The raw facts a coding agent needs, as lines of text, followed by
+    the related warnings and errors the server logged around that time.
+    Server logs say nothing about an error in a visitor's browser, so a
+    browser error gets none."""
+    facts = await facts_for(db, project, incident)
+    if incident.kind != "error":
+        nearby = await nearby_logs(db, project, incident)
+        if nearby:
+            facts += ["Logged around that time:", *nearby]
     return facts
+
+
+async def error_reach(db: AsyncSession, project: Project, fingerprint: str, since: dt.datetime) -> list[str]:
+    """Which browsers a browser error happened in, and whether the visitors
+    who hit it went on to another page: an error that stopped nobody reads
+    differently from one that ended every visit."""
+    p = {"p": project.id, "f": fingerprint, "since": since}
+    browsers = (await db.execute(text("""
+        select browser, count(distinct visitor) n from browser_errors
+        where project_id = :p and fingerprint = :f and ts >= :since and browser <> ''
+        group by browser order by n desc, browser limit 6"""), p)).all()
+    hits = (await db.execute(text("""
+        with hit as (select visitor, min(ts) ts, min(path) path from browser_errors
+                     where project_id = :p and fingerprint = :f and ts >= :since group by visitor)
+        select hit.visitor, array(select distinct v.path from pageviews v where v.project_id = :p
+                                  and v.visitor = hit.visitor and v.ts > hit.ts and v.path <> hit.path
+                                  order by v.path limit 5) next
+        from hit"""), p)).all()
+    lines = []
+    if browsers:
+        lines.append("Browsers: " + ", ".join(f"{b.browser} ({b.n})" for b in browsers) + ".")
+    if hits:
+        went = [h for h in hits if h.next]
+        pages = sorted({path for h in went for path in h.next})[:5]
+        if len(went) == len(hits):
+            who = "The visitor" if len(hits) == 1 else "Both visitors" if len(hits) == 2 else f"All {len(hits)} visitors"
+            lines.append(f"{who} went on to other pages afterwards ({', '.join(pages)}), so it did not stop them.")
+        elif went:
+            lines.append(f"{len(went)} of {len(hits)} visitors went on to other pages afterwards ({', '.join(pages)}); "
+                         f"{len(hits) - len(went)} saw no other page after it.")
+        else:
+            lines.append("The visitor who hit it saw no other page afterwards." if len(hits) == 1 else
+                         f"None of the {len(hits)} visitors who hit it saw another page afterwards.")
+    return lines
 
 
 async def facts_for(db: AsyncSession, project: Project, incident: Incident) -> list[str]:
@@ -127,7 +228,8 @@ async def facts_for(db: AsyncSession, project: Project, incident: Incident) -> l
             {**p, "f": incident.key})).first()
         if r is None:
             return []
-        return [f"{r.message}", f"at {r.file}:{r.line}:{r.col}, on page {r.path}", *r.stack.splitlines()[:15]]
+        return [f"{r.message}", f"at {r.file}:{r.line}:{r.col}, on page {r.path}", *r.stack.splitlines()[:15],
+                *await error_reach(db, project, incident.key, p["since"])]
     if incident.kind == "server":
         r = (await db.execute(text("""
             select kind, message, route, "where" place, trace from server_errors
@@ -289,10 +391,12 @@ async def gather(db: AsyncSession, project: Project, now: dt.datetime, with_evid
     if rest:
         sources.append(Row("Everything else", rest))
 
+    # What broke, and what the coding agent dismissed as not the site's problem, with its reason.
     happened = [(day(i.started_at), past_tense(i)) for i in await db.scalars(
         select(Incident).where(Incident.project_id == project.id, Incident.ended_at.is_not(None),
-                               Incident.level == "broken", Incident.started_at >= now - 30 * DAY)
-        .order_by(Incident.started_at.desc()).limit(10))]
+                               Incident.started_at >= now - 30 * DAY)
+        .order_by(Incident.started_at.desc()).limit(200))
+        if i.level == "broken" or (i.data or {}).get("dismissed_by_agent")][:10]
 
     coming_up = []
     if project.domain_expires_at and dt.timedelta(0) < project.domain_expires_at - now <= 90 * DAY:

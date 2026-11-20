@@ -19,6 +19,9 @@ const HELP = `prodbat: visitors, payments and what is broken, for one site.
   npx prodbat next                  the most important thing to do for the live site, as one task with steps
   npx prodbat tasks                 every open task (npx prodbat task <id> shows one in full)
   npx prodbat done <id>             after finishing a task: Prodbat checks from its side whether it is fixed
+  npx prodbat dismiss <id> --reason "..."
+                                    a task that is not the site's own problem (an error from a browser extension, a bot):
+                                    Prodbat closes it, shows the user your reason, and raises it again if it grows
   npx prodbat status                what is wrong with the live site right now, with evidence
   npx prodbat logs [text]           what the app logged; --level error, --since 1h
   npx prodbat suggestions [id]      more things to watch, as steps for a coding agent
@@ -547,6 +550,11 @@ export async function main(argv, cwd = process.cwd()) {
     show(flags, result);
     if (result.fixed === false) process.exitCode = 1;
     return;
+  }
+  if (command === 'dismiss') {
+    needKey(s);
+    if (!arg || !flags.reason) throw new Stop('Which task, and why? For example: npx prodbat dismiss T12 --reason "It comes from a Safari extension, not the site\'s code."', 2);
+    return show(flags, await call(s, 'POST', `/api/tasks/${encodeURIComponent(arg)}/dismiss`, { auth: s.key, body: { reason: flags.reason } }));
   }
   if (command === 'logs') {
     needKey(s);

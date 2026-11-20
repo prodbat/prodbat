@@ -44,6 +44,7 @@ before(async () => {
       if (req.url === '/api/tasks/next') return send(200, { text: '# Task T12: Fix POST /api/save\n' });
       if (req.url === '/api/tasks/T12/check') return send(200, { fixed: false, text: 'Not fixed.\n' });
       if (req.url === '/api/tasks/S-01/check') return send(200, { fixed: null, text: 'Not yet.\n' });
+      if (req.url === '/api/tasks/T12/dismiss') return send(200, { dismissed: true, text: `Dismissed T12: ${call.body.reason}\n` });
       if (req.url.startsWith('/api/logs')) return send(200, { text: `logs ${req.url.split('?')[1]}\n` });
       if (req.url === '/api/status') return send(200, { status: 'working', text: '# yourapp.com: Everything is working.\n' });
       if (req.url === '/api/setup') return send(200, { complete: false, next: 'S-03', text: 'Setup: 1 of 7 done.\n' });
@@ -130,6 +131,8 @@ test('init sets the project up, writes its files and says where the tag goes', a
   assert.deepEqual([notFixed.code, notFixed.stdout], [1, 'Not fixed.\n'], 'done exits 1 only when Prodbat says it is not fixed');
   assert.equal((await run(dir, 'done', 'S-01')).code, 0, 'too early to tell is not a failure');
   assert.match((await run(dir, 'done')).stderr, /Which task\?/);
+  assert.equal((await run(dir, 'dismiss', 'T12', '--reason', 'A Safari extension threw it.')).stdout, 'Dismissed T12: A Safari extension threw it.\n');
+  assert.match((await run(dir, 'dismiss', 'T12')).stderr, /Which task, and why\?/);
   assert.match(fs.readFileSync(path.join(dir, 'AGENTS.md'), 'utf8'), /npx prodbat next/);
   assert.equal((await run(dir, 'setup')).stdout, 'Setup: 1 of 7 done.\n');
   assert.equal((await run(dir, 'skip', 'S-02')).stdout, 'Skipped S-02.\n');

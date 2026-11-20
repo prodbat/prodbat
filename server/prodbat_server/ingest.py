@@ -18,6 +18,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import noise
 from .models import BrowserError, DailySalt, FailedRequest, Pageview, Project, normalize_domain
 from .sources import classify
 
@@ -136,6 +137,8 @@ async def ingest(request: Request) -> Response:
                 BrowserError(
                     project_id=project.id, visitor=visitor, path=path, fingerprint=fingerprint,
                     message=ev.m, file=ev.f, line=ev.l, col=ev.c, stack=ev.s,
+                    browser=noise.browser_name(user_agent),
+                    origin=noise.classify(ev.m, ev.f, ev.s, project.domain)[0],
                 )
             )
         else:

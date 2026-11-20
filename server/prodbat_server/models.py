@@ -223,6 +223,11 @@ class BrowserError(Base):
     line: Mapped[int] = mapped_column()
     col: Mapped[int] = mapped_column()
     stack: Mapped[str] = mapped_column(Text)
+    # "Safari 18", "Instagram's built-in browser" (noise.browser_name). Never the whole User-Agent.
+    browser: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # "site" when the trace runs through the site's own scripts, "elsewhere" when it doesn't (noise.py).
+    # Only the site's own errors are alerts.
+    origin: Mapped[str] = mapped_column(Text, default="site", server_default="site")
 
 
 class FailedRequest(Base):
@@ -333,7 +338,11 @@ class Incident(Base):
 
 
 class Mute(Base):
-    """The owner said "this is fine, stop telling me"."""
+    """The owner said "this is fine, stop telling me", or the coding agent
+    dismissed a task as not the site's problem. The owner's mute is for good.
+    The agent's lasts while the problem stays the size it was: `reach` is how
+    many visitors (or server errors) it had, and it comes back if it grows to
+    twice that and at least DISMISS_REGROW, or if it starts breaking the site."""
 
     __tablename__ = "mutes"
     __table_args__ = (UniqueConstraint("project_id", "kind", "key"),)
@@ -342,6 +351,9 @@ class Mute(Base):
     project_id: Mapped[uuid.UUID] = project_fk()
     kind: Mapped[str] = mapped_column(Text)
     key: Mapped[str] = mapped_column(Text)
+    by: Mapped[str] = mapped_column(Text, default="owner", server_default="owner")  # "owner" or "agent"
+    reason: Mapped[str | None] = mapped_column(Text)
+    reach: Mapped[int | None] = mapped_column()
     created_at: Mapped[dt.datetime] = timestamp(server_default=func.now())
 
 

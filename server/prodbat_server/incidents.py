@@ -81,6 +81,11 @@ def queue_alert(db: AsyncSession, project: Project, incident: Incident, settings
                                           f"{settings.base}/d/{project.page_token}")
 
 
+# A problem the coding agent dismissed comes back once it reaches at least
+# this many visitors (or server errors) and twice what it had then.
+DISMISS_REGROW = 10
+
+
 async def is_muted(db: AsyncSession, project: Project, kind: str, key: str) -> bool:
     return await db.scalar(select(Mute.id).where(Mute.project_id == project.id, Mute.kind == kind,
                                                  Mute.key == key)) is not None
@@ -88,15 +93,23 @@ async def is_muted(db: AsyncSession, project: Project, kind: str, key: str) -> b
 
 async def report(db: AsyncSession, project: Project, settings: Settings, *, kind: str, key: str = "",
                  level: str, title: str, what: str, who: str, todo: str = "",
-                 started_at: dt.datetime, gather: list | None = None, data: dict | None = None) -> Incident | None:
+                 started_at: dt.datetime, gather: list | None = None, data: dict | None = None,
+                 reach: int | None = None) -> Incident | None:
     """Say that something is wrong. Opens a problem and emails once; while
     it stays open, later calls only refresh the wording, except that a
     'look' that becomes 'broken' is emailed again.
 
     With `gather`, a new problem is added to that list instead of being
     emailed, so the caller can send several as one email (see `digest`)."""
-    if await is_muted(db, project, kind, key):
-        return None
+    mute = await db.scalar(select(Mute).where(Mute.project_id == project.id, Mute.kind == kind, Mute.key == key))
+    if mute is not None:
+        # The owner's "this is fine" is for good. The agent's dismissal holds while the
+        # problem stays small, and ends if it grows or starts breaking the site.
+        grown = reach is not None and reach >= max(2 * (mute.reach or 0), DISMISS_REGROW)
+        if mute.by != "agent" or not (grown or level == "broken"):
+            return None
+        data = {**(data or {}), "dismissed": mute.reason, "dismissed_reach": mute.reach}
+        await db.delete(mute)
     incident = await db.scalar(select(Incident).where(
         Incident.project_id == project.id, Incident.kind == kind, Incident.key == key,
         Incident.ended_at.is_(None)))

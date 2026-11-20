@@ -19,7 +19,7 @@
 <thead><tr><th>Issue</th><th>Where</th><th class="num">Events</th><th class="num">Visitors</th><th>Trend</th><th>Last seen</th><th>First seen</th></tr></thead>
 <tbody>
 {% for i in issues %}<tr>
-<td class="clip"><a href="/d/{{ token }}/errors/{{ i.source }}/{{ i.key }}?range={{ range }}"><strong>{{ i.title | truncate(140) }}</strong></a><br><span class="tag">{{ sources[i.source] }}</span></td>
+<td class="clip"><a href="/d/{{ token }}/errors/{{ i.source }}/{{ i.key }}?range={{ range }}"><strong>{{ i.title | truncate(140) }}</strong></a><br><span class="tag">{{ sources[i.source] }}</span>{% if i.elsewhere %} <span class="tag" title="Its trace doesn't run through any of the site's own scripts, so it isn't an alert">Probably not your code</span>{% endif %}</td>
 <td class="mono clip">{{ i.where or '' }}</td>
 <td class="num">{{ "{:,}".format(i.count) }}</td>
 <td class="num">{{ "{:,}".format(i.users) if i.users is not none else '–' }}</td>

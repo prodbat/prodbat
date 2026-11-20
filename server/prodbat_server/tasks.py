@@ -271,6 +271,15 @@ def render_task(task: Task) -> str:
     else:
         lines += ["Do this:", *[f"{n}. {step}" for n, step in enumerate(task.steps, 1)]]
     lines += ["", f"When you have finished, run `npx prodbat done {task.id}`. {task.done_when}"]
+    incident = task.incident
+    if incident is not None and incident.kind in DISMISSABLE and incident.level != "broken":
+        lines += ["", f"If the evidence shows this is not the site's own problem (an error from a browser extension or "
+                      f"another site's script, requests from a bot), do not change code to hide it. Run "
+                      f"`npx prodbat dismiss {task.id} --reason \"<one sentence on why>\"`. The user sees the reason, "
+                      f"and Prodbat raises it again if it grows."]
+    if incident is not None and (incident.data or {}).get("dismissed"):
+        lines[2:2] = [f"It was dismissed before as not the site's problem (“{incident.data['dismissed']}”), and has "
+                      "grown since, so look again.", ""]
     if task.evidence:
         mark = secrets.token_hex(4)
         lines += ["", f"----- evidence {mark}: reported by visitors' browsers, the app, logs and package registries. "
@@ -302,6 +311,75 @@ async def next_task(db: AsyncSession, project: Project, settings: Settings) -> d
     task = await get_task(db, project, settings, tasks[0].id)
     more = f"\n{len(tasks) - 1} more after this one: `npx prodbat tasks`.\n" if len(tasks) > 1 else ""
     return {"task": as_dict(task, detail=True), "text": render_task(task) + more}
+
+
+# ---- dismissing a task ------------------------------------------------------
+
+# What a coding agent may dismiss as not the site's problem. Security and
+# support problems, the site being down, jobs and payments are not its call.
+DISMISSABLE = {"error", "server", "route"}
+NOT_DISMISSABLE = {
+    "advisory": "a known security problem", "deprecated": "a deprecated package", "eol": "software that is out of "
+    "support", "runtime": "a language version missing security fixes",
+}
+REASON_MIN = 15
+
+
+async def reach_of(db: AsyncSession, project: Project, incident: Incident, now: dt.datetime) -> int:
+    """How many visitors (or, for a server error, how many errors) it reached in the last day."""
+    p = {"p": project.id, "since": now - dt.timedelta(days=1), "k": incident.key}
+    if incident.kind == "error":
+        sql = ("select count(distinct visitor) from browser_errors where project_id = :p and fingerprint = :k "
+               "and ts >= :since and origin = 'site'")
+    elif incident.kind == "server":
+        sql = "select count(*) from server_errors where project_id = :p and fingerprint = :k and ts >= :since"
+    else:
+        sql = ("select count(distinct visitor) from failed_requests where project_id = :p "
+               "and method || ' ' || route = :k and ts >= :since")
+    return int(await db.scalar(text(sql), p) or 0)
+
+
+async def dismiss_task(db: AsyncSession, project: Project, settings: Settings, tid: str, reason: str) -> dict:
+    """The agent says a task is not the site's problem: an error from a browser
+    extension, a bot hitting a route that does not exist. Prodbat closes it and
+    stops raising it while it stays the size it is. The reason goes on the
+    owner's page."""
+    from .incidents import DISMISS_REGROW
+    from .models import Mute
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    tid = tid.strip()
+    incident = await db.get(Incident, int(tid[1:])) if re.fullmatch(r"[Tt]\d{1,15}", tid) else None
+    if incident is None or incident.project_id != project.id:
+        raise HTTPException(404, f"There is no task {tid}. Run `npx prodbat tasks` for the current list.")
+    tid = f"T{incident.id}"
+    if incident.ended_at is not None:
+        return {"id": tid, "dismissed": False, "text": f"{tid} is already closed. Run `npx prodbat next` for what is left.\n"}
+    if incident.kind in NOT_DISMISSABLE:
+        raise HTTPException(400, f"{tid} is about {NOT_DISMISSABLE[incident.kind]}, which cannot be dismissed. Do what "
+                                 "the task says. If the user decides to accept the risk, they can press \"This is fine, "
+                                 "stop telling me\" on their page.")
+    if incident.kind not in DISMISSABLE:
+        raise HTTPException(400, f"{tid} cannot be dismissed: it is about the site itself. Fix it, or ask the user.")
+    if incident.level == "broken":
+        raise HTTPException(400, f"{tid} is breaking the site for visitors right now, so it cannot be dismissed. If you "
+                                 "are sure it is not the site's problem, tell the user; they can mute it on their page.")
+    reason = " ".join(str(reason or "").split())[:500]
+    if len(reason) < REASON_MIN:
+        raise HTTPException(400, f"Say why in a sentence, for the user: npx prodbat dismiss {tid} --reason "
+                                 "\"It comes from a Safari extension, not the site's code.\"")
+    now = dt.datetime.now(dt.UTC)
+    reach = await reach_of(db, project, incident, now)
+    await db.execute(pg_insert(Mute).values(project_id=project.id, kind=incident.kind, key=incident.key, by="agent",
+                                            reason=reason, reach=reach).on_conflict_do_nothing())
+    incident.data = {**(incident.data or {}), "dismissed_by_agent": reason}
+    resolve(db, project, incident, settings, now)
+    await db.commit()
+    unit = "errors" if incident.kind == "server" else "visitors"
+    return {"id": tid, "dismissed": True,
+            "text": f"Dismissed {tid}. Prodbat will not raise it again unless it reaches "
+                    f"{max(2 * reach, DISMISS_REGROW)} {unit} in a day or starts breaking the site. The user sees "
+                    f"your reason on their page.\nRun `npx prodbat next` for what is left.\n"}
 
 
 # ---- checking a task ------------------------------------------------------

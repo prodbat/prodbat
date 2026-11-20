@@ -154,7 +154,7 @@ def test_verify_points_to_setup_until_it_is_complete(client, db, project, key):
 
 def test_setup_is_a_tool_over_mcp_and_initialize_tells_the_agent_to_finish_it(client, project, key):
     init = rpc(client, "initialize")["result"]
-    assert init["serverInfo"]["version"] == "0.2.0"
+    assert init["serverInfo"]["version"] == "0.3.0"
     said = init["instructions"]
     assert "call prodbat_setup and work through every item until it says setup is complete" in said
     assert "call prodbat_next_task at the start of each session" in said

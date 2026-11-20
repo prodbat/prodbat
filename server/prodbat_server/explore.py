@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 
 from .api import LEVELS, find_logs
 from .charts import RANGES, bars, counts, spark, window
-from . import dependencies
+from . import dependencies, noise
 from .models import Incident, Job, QueueReport
 from .page import PRIVATE, project_by_token, templates
 from .tasks import path_value, where_value
@@ -44,12 +44,13 @@ async def issues(db, project, w, source: str, q: str) -> list[dict]:
     if source in ("all", "browser"):
         rows = await db.execute(text(
             "select fingerprint, max(message), max(file), max(line), count(*), count(distinct visitor), min(ts), "
-            "max(ts), max(path) from browser_errors where project_id = :pid and ts >= :start"
+            "max(ts), max(path), bool_and(origin = 'elsewhere') from browser_errors "
+            "where project_id = :pid and ts >= :start"
             + (" and message ilike :q" if q else "") + " group by fingerprint"),
             {"pid": project.id, "start": w.start, **like})
-        for fp, message, file, line, n, users, first, last, path in rows:
+        for fp, message, file, line, n, users, first, last, path, elsewhere in rows:
             out.append({"source": "browser", "key": fp, "title": message, "where": f"{file}:{line}" if file else path,
-                        "count": n, "users": users, "first": first, "last": last})
+                        "count": n, "users": users, "first": first, "last": last, "elsewhere": elsewhere})
     if source in ("all", "server"):
         rows = await db.execute(text(
             'select fingerprint, max(kind), max(message), max(route), max("where"), count(*), min(ts), max(ts) '
@@ -111,12 +112,14 @@ async def issue(request: Request, token: str, source: str, key: str, range: str 
         params = {"pid": project.id, "key": key}
         if source == "browser":
             rows = (await db.execute(text(
-                "select ts, path, visitor, message, file, line, col, stack from browser_errors "
+                "select ts, path, visitor, message, file, line, col, stack, browser from browser_errors "
                 "where project_id = :pid and fingerprint = :key order by ts desc limit 50"), params)).all()
-            events = [{"ts": r[0], "at": r[1], "who": r[2][:8]} for r in rows]
+            events = [{"ts": r[0], "at": r[1], "who": r[2][:8], "browser": r[8]} for r in rows]
             latest = rows[0] if rows else None
+            origin, why = noise.classify(latest[3], latest[4], latest[7], project.domain) if latest else ("", "")
             detail = latest and {"title": latest[3], "where": f"{latest[4]}:{latest[5]}:{latest[6]}",
-                                 "trace": latest[7], "route": latest[1]}
+                                 "trace": latest[7], "route": latest[1],
+                                 "elsewhere": why if origin == noise.ELSEWHERE else ""}
         elif source == "server":
             rows = (await db.execute(text(
                 'select ts, route, status, kind, message, "where", trace from server_errors '

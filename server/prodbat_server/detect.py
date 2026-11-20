@@ -92,7 +92,7 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
         existing = open_.get(("route", key))
         if r.recent_v >= (FLOW_BROKEN if flow else BROKEN_VISITORS):
             part = f" This is part of your {SAY[flow][1]}." if flow else ""
-            await say("route", key, level="broken", title=SAY[flow][0] if flow else f"{key} is failing",
+            await say("route", key, reach=r.v, level="broken", title=SAY[flow][0] if flow else f"{key} is failing",
                       what=f"{key} {did} for {plural(r.recent_v, 'visitor')} in the last 15 minutes.{part}",
                       who=who, started_at=r.recent_first,
                       data={"method": r.method, "route": r.route, "status": r.status, "flow": flow})
@@ -101,24 +101,24 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
         elif existing and existing.level == "broken":
             pass  # quiet: closed below with a "working again"
         elif v >= LOOK_VISITORS:
-            await say("route", key, level="look", title=f"{key} {did}",
+            await say("route", key, reach=r.v, level="look", title=f"{key} {did}",
                       what=f"{key} {did} {plural(r.n, 'time')} in the last 24 hours.", who=who,
                       started_at=r.first,
                       data={"method": r.method, "route": r.route, "status": r.status, "flow": flow})
 
-    # Errors in the page's own code.
+    # Errors in the page's own code. Errors from extensions and other sites' scripts are kept, not alerted on (noise.py).
     for r in await db.execute(text("""
         select fingerprint, max(message) message, max(file) file, max(line) line, max(path) path,
                count(distinct visitor) v, min(ts) first
-        from browser_errors where project_id = :p and ts >= :day
+        from browser_errors where project_id = :p and ts >= :day and origin = 'site'
         group by fingerprint"""), p):
         since = closed.get(("error", r.fingerprint))
         v = r.v if not since else await db.scalar(text("""select count(distinct visitor) from browser_errors
-            where project_id = :p and fingerprint = :f and ts > :since"""),
+            where project_id = :p and fingerprint = :f and ts > :since and origin = 'site'"""),
             {"p": project.id, "f": r.fingerprint, "since": since})
         if v >= LOOK_VISITORS:
             where = f" ({r.file.rsplit('/', 1)[-1]}, line {r.line})" if r.file else ""
-            await say("error", r.fingerprint, level="look", title=f"An error in your code on {r.path}",
+            await say("error", r.fingerprint, reach=r.v, level="look", title=f"An error in your code on {r.path}",
                       what=f"“{r.message}”{where}.", who=f"{plural(r.v, 'visitor')} in the last 24 hours.",
                       started_at=r.first, data={"path": r.path, "file": r.file, "line": r.line})
 
@@ -141,7 +141,7 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
         existing = open_.get(("server", r.fingerprint))
         if r.recent_n >= (FLOW_BROKEN if flow else SERVER_BROKEN_COUNT):
             part = f" This is part of your {SAY[flow][1]}." if flow else ""
-            await say("server", r.fingerprint, level="broken", title=SAY[flow][0] if flow else f"{on} is failing",
+            await say("server", r.fingerprint, reach=r.n, level="broken", title=SAY[flow][0] if flow else f"{on} is failing",
                       what=f"{on} failed {plural(r.recent_n, 'time')} in the last 15 minutes. Cause: {cause}.{part}",
                       who=f"{plural(r.n, 'request')} failed in the last 24 hours.", started_at=r.recent_first,
                       data={"route": r.route, "kind": r.kind, "where": r.place, "flow": flow})
@@ -150,7 +150,7 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
         elif existing and existing.level == "broken":
             pass
         elif n >= 1:
-            await say("server", r.fingerprint, level="look", title=f"{on} failed",
+            await say("server", r.fingerprint, reach=r.n, level="look", title=f"{on} failed",
                       what=f"{on} failed {plural(r.n, 'time')} in the last 24 hours. Cause: {cause}.",
                       who=f"{plural(r.n, 'request')} failed.", started_at=r.first,
                       data={"route": r.route, "kind": r.kind, "where": r.place, "flow": flow})

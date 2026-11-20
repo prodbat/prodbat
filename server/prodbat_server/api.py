@@ -847,6 +847,20 @@ async def get_task(request: Request, tid: str) -> dict:
         return tasks.as_dict(await tasks.get_task(db, project, request.app.state.settings, tid), detail=True)
 
 
+class Dismissal(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
+@router.post("/tasks/{tid}/dismiss")
+async def dismiss_task(request: Request, tid: str, body: Dismissal) -> dict:
+    from . import tasks
+
+    async with request.app.state.sessions() as db:
+        project = await project_for(request, db)
+        request.app.state.limiter.check("task-dismiss", str(project.id), 30, 3600)
+        return await tasks.dismiss_task(db, project, request.app.state.settings, tid, body.reason)
+
+
 @router.post("/tasks/{tid}/check")
 async def post_task_check(request: Request, tid: str) -> dict:
     from . import tasks
