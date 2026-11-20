@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>@media (prefers-color-scheme: dark) { .head { fill: #F4F5F1 } }</style>
+  <title>Prodbat</title>
+  <path class="head" d="M7 9 L21 21 L32 16 L43 21 L57 9 V43 a13 13 0 0 1 -13 13 H20 a13 13 0 0 1 -13 -13 Z" fill="#15181B"/>
+  <circle cx="23.5" cy="36" r="4.6" fill="#8FDDAA"/>
+  <circle cx="40.5" cy="36" r="4.6" fill="#8FDDAA"/>
+</svg>

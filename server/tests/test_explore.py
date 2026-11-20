@@ -99,3 +99,14 @@ def test_every_view_works_empty_and_the_overview_links_to_them(client, project):
     overview = client.get(f"/d/{t}").text
     assert f'href="/d/{t}/errors"' in overview and f'href="/d/{t}/metrics"' in overview
     assert client.get(f"/d/{t}/logs", params={"before": "yesterday"}).status_code == 400
+
+
+def test_every_page_has_the_favicon_and_the_new_mark(client, project):
+    t = project.page_token
+    for path in (f"/d/{t}", f"/d/{t}/packages"):
+        page = client.get(path).text
+        assert 'href="/static/favicon.svg"' in page and 'href="/favicon.ico"' in page
+        assert 'fill="#8FDDAA"' in page  # the head with its eyes
+    icon = client.get("/favicon.ico")
+    assert icon.status_code == 200 and icon.headers["content-type"] == "image/x-icon"
+    assert client.get("/static/favicon.svg").status_code == 200

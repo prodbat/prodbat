@@ -55,6 +55,11 @@ def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None 
             headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
         )
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> FileResponse:
+        return FileResponse(STATIC / "favicon.ico", media_type="image/x-icon",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get("/llms.txt", response_class=PlainTextResponse)
     async def llms() -> str:
         return (STATIC / "llms.txt").read_text().replace("{server}", settings.base)
