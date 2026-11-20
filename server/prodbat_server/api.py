@@ -802,16 +802,47 @@ async def get_logs(request: Request, q: str | None = None, level: str | None = N
 
 # ---- the setup checklist -------------------------------------------------
 
+async def activation_of(request: Request, db, project: Project) -> dict | None:
+    """Whether the owner still has to activate the dashboard, for the message the agent passes on at the end of
+    setup. Hosted Prodbat sets app.state.activation_status; a self-hosted server has nothing to activate."""
+    found = getattr(request.app.state, "activation_status", None)
+    return await found(request, db, project) if found else None
+
+
+async def setup_answer(request: Request, db, project: Project, show_all: bool = False) -> dict:
+    items = await setup.checklist(db, project)
+    activation = await activation_of(request, db, project) if setup.complete(items) else None
+    return setup.as_dict(items, project, request.app.state.settings, show_all, activation)
+
+
 @router.get("/setup")
-async def get_setup(request: Request) -> dict:
+async def get_setup(request: Request, all: bool = False) -> dict:
     async with request.app.state.sessions() as db:
-        return await setup.setup(db, await project_for(request, db), request.app.state.settings)
+        return await setup_answer(request, db, await project_for(request, db), all)
+
+
+class Skip(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class Finished(BaseModel):
+    ids: list[str] = Field(max_length=setup.MOST_AT_ONCE)
+
+
+@router.post("/setup/done")
+async def post_setup_done(request: Request, body: Finished) -> dict:
+    async with request.app.state.sessions() as db:
+        project = await project_for(request, db)
+        request.app.state.limiter.check("task-check", str(project.id), 60, 60)
+        return await setup.finish(db, project, request.app.state.settings, body.ids,
+                                  lambda: activation_of(request, db, project))
 
 
 @router.post("/setup/{sid}/skip")
-async def post_setup_skip(request: Request, sid: str) -> dict:
+async def post_setup_skip(request: Request, sid: str, body: Skip | None = None) -> dict:
     async with request.app.state.sessions() as db:
-        return await setup.skip(db, await project_for(request, db), request.app.state.settings, sid)
+        return await setup.skip(db, await project_for(request, db), request.app.state.settings, sid,
+                                body.reason if body else None)
 
 
 @router.delete("/setup/{sid}/skip")

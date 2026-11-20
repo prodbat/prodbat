@@ -242,7 +242,7 @@ async def list_tasks(db: AsyncSession, project: Project, settings: Settings) -> 
     # Things to set up, in the setup checklist's order. Serving the script from the site's own domain
     # (S-04) is optional polish, not work to hand out. Items the agent skipped as not applying, or has
     # finished and are waiting for their first data, are not handed out again.
-    left_out = set(project.setup_skipped or []) | setup.waiting_ids(project, dt.datetime.now(dt.UTC))
+    left_out = set(setup.skipped(project)) | setup.waiting_ids(project, dt.datetime.now(dt.UTC))
     found = {s["id"]: s for s in await applicable(db, project)}
     for index, sid in enumerate(sid for sid in setup.ORDER if sid in found and sid not in left_out):
         suggestion = found[sid]

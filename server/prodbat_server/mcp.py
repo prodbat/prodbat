@@ -27,9 +27,13 @@ INSTRUCTIONS = """\
 Prodbat watches this app in production: visitors, errors, failing requests, payments, scheduled jobs, queues, logs \
 and the packages it is built on, and it alerts the owner when something breaks.
 When you first connect to this project, call prodbat_setup and work through every item until it says setup is \
-complete. Each item turns on part of what the user has. After each change, deploy, then call prodbat_check_task with \
-the item's id. If an item truly does not apply to this app (no scheduled jobs, no payments, no job queue), call \
-prodbat_skip_setup instead of inventing something. Ask the user if you are not sure.
+complete. Each item turns on part of what the user has. Do not ship between items: call prodbat_setup with all \
+set to true for the steps of every item left, make all the changes, then ship them together the way this \
+project usually ships (a pull request, a deploy). Then call prodbat_setup_done with the ids you finished \
+(script included), and prodbat_setup. If an \
+item truly does not apply to this app (no scheduled jobs, no payments, no job queue), call prodbat_skip_setup \
+instead of inventing something. Ask the user if you are not sure. When setup is complete, prodbat_setup ends with \
+a message for the user: pass it on.
 Once setup is complete, call prodbat_next_task at the start of each session, and prodbat_verify after each deploy.
 If a task turns out not to be the site's own problem (an error from a browser extension, a bot), call \
 prodbat_dismiss_task with the reason instead of changing code to hide it.
@@ -39,15 +43,24 @@ The npx prodbat commands named in answers do the same things as these tools."""
 
 TOOLS = [
     {"name": "prodbat_setup",
-     "description": "The setup checklist: what is done, what is left, and the exact steps for the next item. Call "
-                    "this when you first connect to a project, and keep working through it until it says setup is "
-                    "complete.",
-     "inputSchema": NO_ARGS},
+     "description": "The setup checklist: what is done, what is left, and the exact steps for the next item (with "
+                    "all, for every item left). Call this when you first connect to a project, and keep working "
+                    "through it until it says setup is complete. Make every change, then ship them together.",
+     "inputSchema": {"type": "object", "properties": {"all": {
+         "type": "boolean", "description": "The steps for every item left, not only the next one"}}}},
+    {"name": "prodbat_setup_done",
+     "description": "After making the changes for several setup items and deploying once: counts each one done, or "
+                    "finished and waiting for its first data, and says what is left.",
+     "inputSchema": {"type": "object", "properties": {"ids": {
+         "type": "array", "items": {"type": "string"}, "description": "Setup item ids, such as S-03 and S-05"}},
+         "required": ["ids"]}},
     {"name": "prodbat_skip_setup",
      "description": "Skip a setup item that truly does not apply to this app, such as watching scheduled jobs in an "
                     "app that has none. Ask the user if you are not sure.",
-     "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "A setup item id, such as S-02"}},
-                     "required": ["id"]}},
+     "inputSchema": {"type": "object", "properties": {
+         "id": {"type": "string", "description": "A setup item id, such as S-02"},
+         "reason": {"type": "string", "description": "Why it does not apply, in a few words; the checklist shows it"}},
+         "required": ["id"]}},
     {"name": "prodbat_next_task",
      "description": "The most important thing to do for the live site right now, as one task with exact steps "
                     "and the evidence. Once setup is complete (prodbat_setup), call this at the start of each "
@@ -107,9 +120,17 @@ async def call(request: Request, name: str, args: dict) -> str:
     async with state.sessions() as db:
         project = await api.project_for(request, db)
         if name == "prodbat_setup":
-            return (await setup.setup(db, project, state.settings))["text"]
+            return (await api.setup_answer(request, db, project, args.get("all") is True))["text"]
+        if name == "prodbat_setup_done":
+            state.limiter.check("task-check", str(project.id), 60, 60)
+            ids = args.get("ids")
+            ids = [str(i) for i in ids] if isinstance(ids, list) else [str(ids or "")]
+            return (await setup.finish(db, project, state.settings, ids[:setup.MOST_AT_ONCE + 1],
+                                       lambda: api.activation_of(request, db, project)))["text"]
         if name == "prodbat_skip_setup":
-            return (await setup.skip(db, project, state.settings, str(args.get("id", ""))))["text"]
+            reason = args.get("reason")
+            return (await setup.skip(db, project, state.settings, str(args.get("id", "")),
+                                     reason if isinstance(reason, str) else None))["text"]
         if name == "prodbat_next_task":
             return (await tasks.next_task(db, project, state.settings))["text"]
         if name == "prodbat_tasks":
@@ -175,7 +196,7 @@ async def mcp(request: Request) -> Response:
         # Answer in the client's version when it is one this server speaks.
         asked = (message.get("params") or {}).get("protocolVersion")
         return result({"protocolVersion": asked if asked in PROTOCOLS else PROTOCOL, "capabilities": {"tools": {}},
-                       "serverInfo": {"name": "prodbat", "version": "0.3.0"}, "instructions": INSTRUCTIONS})
+                       "serverInfo": {"name": "prodbat", "version": "0.4.0"}, "instructions": INSTRUCTIONS})
     if method == "ping":
         return result({})
     if method == "tools/list":

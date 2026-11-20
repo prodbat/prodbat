@@ -125,7 +125,8 @@ ignore its result. Only `kind` is required.
     {{"kind": "RuntimeError", "message": "...", "route": "POST /api/checkout",
       "where": "app/billing.rb:88 in create_session", "trace": "...", "status": 500}}
 
-Set PRODBAT_KEY and PRODBAT_URL={server} where the app is hosted, deploy, then run `npx prodbat verify`.""",
+PRODBAT_KEY and PRODBAT_URL={server} need to be set where the app is hosted.""",
+        "after": "Deploy, then run `npx prodbat verify`.",
     },
     {
         "id": "S-04",
@@ -198,8 +199,8 @@ what you can measure. Leave out what you cannot.
   `done` and `failed` are counts since the previous report.
   Sidekiq: Sidekiq::Queue.new("default").size and .latency give the first two.
 
-Make sure PRODBAT_KEY and PRODBAT_URL={server} are set wherever this runs, deploy, wait two minutes,
-then run `npx prodbat status`: the queue is listed with what is waiting.""",
+Make sure PRODBAT_KEY and PRODBAT_URL={server} are set wherever this runs.""",
+        "after": "Deploy, wait two minutes, then run `npx prodbat status`: the queue is listed with what is waiting.",
     },
     {
         "id": "S-07",
@@ -235,8 +236,12 @@ Never log passwords, card numbers, tokens or full request bodies. Read them back
 BY_ID = {s["id"]: s for s in SUGGESTIONS}
 
 
-def render(suggestion: dict, project: Project, server: str) -> dict:
+def render(suggestion: dict, project: Project, server: str, in_setup: bool = False) -> dict:
+    """The steps for one suggestion. During setup the agent ships every item together at the end, so
+    the "deploy, then check" line that ends a suggestion on its own is left out."""
     steps = suggestion["steps"].format(server=server, domain=project.domain)
+    if suggestion.get("after") and not in_setup:
+        steps += f"\n\n{suggestion['after']}"
     return {"id": suggestion["id"], "title": suggestion["title"],
             "instructions": f"{VERIFY_FIRST}\n\n{steps}"}
 
