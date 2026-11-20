@@ -49,7 +49,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"all": {
          "type": "boolean", "description": "The steps for every item left, not only the next one"}}}},
     {"name": "prodbat_setup_done",
-     "description": "After making the changes for several setup items and deploying once: counts each one done, or "
+     "description": "After making the changes for several setup items and shipping them together: counts each one done, or "
                     "finished and waiting for its first data, and says what is left.",
      "inputSchema": {"type": "object", "properties": {"ids": {
          "type": "array", "items": {"type": "string"}, "description": "Setup item ids, such as S-03 and S-05"}},

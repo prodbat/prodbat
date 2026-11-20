@@ -77,6 +77,9 @@ class Summary:
     checks: int = 0
     # Where this week's buyers came from, when payments carry the script's reference.
     buyers: list[Row] = field(default_factory=list)
+    # "paying" (payments have come in), "connected" (Stripe events arrive, no payment
+    # yet), "finished" (the agent says it set up forwarding; nothing has arrived) or "".
+    stripe: str = ""
 
     @property
     def sentence(self) -> str:
@@ -336,9 +339,20 @@ async def gather(db: AsyncSession, project: Project, now: dt.datetime, with_evid
     connected = await db.scalar(text("select max(ts) from payments where project_id = :p"), p)
     sells: list[Row] = []
     buyers: list[Row] = []
+    if connected:
+        stripe = "paying"
+    elif project.stripe_seen_at is not None:
+        stripe = "connected"
+    elif "S-01" in (project.setup_waiting or {}):
+        stripe = "finished"
+    else:
+        stripe = ""
     if not connected:
         payments_n = 0
-        numbers_money = [Number("Payments", "–", "Stripe is not connected yet"), Number("Paid", "–")]
+        numbers_money = [Number("Payments", "0" if stripe else "–", {
+            "connected": "Stripe is connected; no payments yet",
+            "finished": "Set up; waiting for the first payment",
+        }.get(stripe, "Stripe is not connected yet")), Number("Paid", "–")]
     else:
         main = by_currency[0] if by_currency else None
         cur = main.currency if main else "usd"
@@ -454,7 +468,15 @@ async def gather(db: AsyncSession, project: Project, now: dt.datetime, with_evid
     else:
         proof = "Nothing has arrived from your site's pages yet."
 
-    return Summary(project.domain, status, proof, numbers, pages, sources, sells, bool(connected),
-                   f"Last payment: {ago(connected, now)}." if connected else "", problems, happened, coming_up,
+    last_payment = {
+        "paying": f"Last payment: {ago(connected, now)}." if connected else "",
+        "connected": "Stripe is connected. No payments have come in yet; they show up here with the first one.",
+        "finished": "Your coding agent set up Stripe forwarding. Payments show up here with the first one "
+                    "after the change is live.",
+    }.get(stripe, "")
+    summary = Summary(project.domain, status, proof, numbers, pages, sources, sells, bool(stripe),
+                   last_payment, problems, happened, coming_up,
                    await first_suggestion(db, project), work, package_notes, has_logs, visitors, payments_n, checks,
                    buyers)
+    summary.stripe = stripe
+    return summary

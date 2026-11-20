@@ -129,6 +129,29 @@ def test_forwarded_stripe_events_become_what_sells(client, db, project, key):
     assert "Run `npx prodbat suggestions S-02` and follow it." in text
 
 
+def test_stripe_shows_as_connected_before_the_first_payment(client, db, project, key):
+    db.add(view(project, "someone", "/", "ChatGPT", "ai"))
+    db.commit()
+    text = page_text(client, project)
+    assert "Payments show up here once your Stripe webhook forwards its events." in text
+    assert "Stripe is not connected yet" in text
+
+    # The agent says it finished the Stripe step; nothing has arrived yet.
+    db.execute(update(Project).where(Project.id == project.id).values(setup_waiting={"S-01": NOW.isoformat()}))
+    db.commit()
+    text = page_text(client, project)
+    assert "forwards its events" not in text and "not connected" not in text
+    assert "Your coding agent set up Stripe forwarding." in text
+    assert "Set up; waiting for the first payment" in text
+
+    # Any forwarded event, even one that is not a payment, shows Stripe is connected.
+    client.post("/api/stripe", json={"type": "customer.created", "data": {"object": {}}}, headers=key)
+    text = page_text(client, project)
+    assert "Stripe is connected. No payments have come in yet" in text
+    assert "Stripe is connected; no payments yet" in text and "No payments this week." not in text
+    assert "S-01" not in text  # the setup item counts as done
+
+
 def test_product_names_are_read_from_invoice_lines():
     assert product_name("1 × Pro plan (at $19.00 / month)") == "Pro plan"
     assert product_name("3 x Seats (at $5.00 / month)") == "Seats"

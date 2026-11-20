@@ -90,6 +90,9 @@ class Project(Base):
     # own server: what the page's setup checklist ticks off.
     first_data_at: Mapped[dt.datetime | None] = timestamp()
     first_server_at: Mapped[dt.datetime | None] = timestamp()
+    # The first Stripe event the site forwarded, of any kind: Stripe is connected
+    # even when nobody has paid yet.
+    stripe_seen_at: Mapped[dt.datetime | None] = timestamp()
     # The agent's setup checklist (setup.py): suggestion ids the agent said do
     # not apply to this app, and items it has finished that wait for their
     # first data, as {id: when it said so}.

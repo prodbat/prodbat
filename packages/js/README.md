@@ -10,13 +10,13 @@ Works on Node 18+, Bun, Deno, Supabase Edge Functions, Cloudflare Workers and Ve
 npx prodbat init --email you@example.com
 ```
 
-This creates the project on hosted Prodbat (prodbat.com), writes `PRODBAT_KEY` and `PRODBAT_URL` to `.env`, and prints the script tag for your pages. Prodbat emails that address a link to activate the dashboard; the alerts go there too. `npx prodbat setup --all` is the checklist your agent works through: server errors, security alerts for your packages, logs, payments, scheduled jobs and the job queue. It makes every change, deploys once, and runs `npx prodbat done` with the items it finished. init takes off the list what your app shows no sign of; `npx prodbat skip <id>` skips anything else your app doesn't have. init also writes the Prodbat skill to `.claude/skills/prodbat/SKILL.md` and a short Prodbat section to `AGENTS.md`, and sets up Prodbat's MCP server for Claude Code (`.mcp.json`) and Cursor (`.cursor/mcp.json`), which read `PRODBAT_KEY` from the environment the agent was started from. On your own server, add `--server <url> --token <admin token>`. To check any site from outside without an account: `npx prodbat check yoursite.com`.
+This creates the project on hosted Prodbat (prodbat.com), writes `PRODBAT_KEY` and `PRODBAT_URL` to `.env`, and prints the script tag for your pages. Prodbat emails that address a link to activate the dashboard; the alerts go there too. `npx prodbat setup --all` is the checklist your agent works through: server errors, security alerts for your packages, logs, payments, scheduled jobs and the job queue. It makes every change, ships them together the way your project usually ships (a pull request or a deploy), and runs `npx prodbat done` with the items it finished. init takes off the list what your app shows no sign of; `npx prodbat skip <id>` skips anything else your app doesn't have. init also writes the Prodbat skill to `.claude/skills/prodbat/SKILL.md` and a short Prodbat section to `AGENTS.md`, and sets up Prodbat's MCP server for Claude Code (`.mcp.json`) and Cursor (`.cursor/mcp.json`), which read `PRODBAT_KEY` from the environment the agent was started from. On your own server, add `--server <url> --token <admin token>`. To check any site from outside without an account: `npx prodbat check yoursite.com`.
 
 ## The command line
 
 ```sh
 npx prodbat setup          # the setup checklist: what is done, and the steps for the next item (--all: every item left)
-npx prodbat done S-03 S-05 # after making several setup changes and deploying once: counts them all
+npx prodbat done S-03 S-05 # after making several setup changes and shipping them together: counts them all
 npx prodbat skip <id>      # skip a setup item your app doesn't have (no payments, no scheduled jobs)
 npx prodbat status         # what is wrong with the live site right now, with evidence
 npx prodbat next           # the most important thing to fix, as one task with steps

@@ -21,7 +21,7 @@ const HELP = `prodbat: visitors, payments and what is broken, for one site.
   npx prodbat next                  the most important thing to do for the live site, as one task with steps
   npx prodbat tasks                 every open task (npx prodbat task <id> shows one in full)
   npx prodbat done <id>             after finishing a task: Prodbat checks from its side whether it is fixed
-  npx prodbat done <id> <id> ...    after making several setup items' changes and deploying once: counts them all
+  npx prodbat done <id> <id> ...    after making several setup items' changes and shipping them together: counts them all
   npx prodbat dismiss <id> --reason "..."
                                     a task that is not the site's own problem (an error from a browser extension, a bot):
                                     Prodbat closes it, shows the user your reason, and raises it again if it grows

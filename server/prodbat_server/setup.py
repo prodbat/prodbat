@@ -10,9 +10,9 @@ finished waits for it, and does not hold setup up. An item that does not
 apply to the app (no scheduled jobs, no payments) can be skipped, with a
 reason the checklist shows (init skips the ones it finds no sign of).
 
-The agent makes every change first and deploys once: a deploy is where an
-agent stops to ask permission, so one deploy for the whole list means setup
-finishes in one pass. `npx prodbat done` takes every id it finished at once.
+The agent makes every change first and ships them together the way the
+project usually ships (a pull request or a deploy), so setup finishes in one
+pass. `npx prodbat done` takes every id it finished at once.
 When nothing is left, the checklist ends with a message for the agent to
 pass on to the user.
 
@@ -332,7 +332,7 @@ async def mark_waiting(db: AsyncSession, project: Project, sid: str, now: dt.dat
 
 
 async def finish(db: AsyncSession, project: Project, settings: Settings, ids: list[str], activation_of=None) -> dict:
-    """The agent made the change for these items and deployed once: each one is done, or finished and
+    """The agent made the change for these items and shipped them together: each one is done, or finished and
     waiting for its first data. The whole checklist follows, so the same answer says what is left."""
     if not ids:
         raise HTTPException(400, "Which setup items did you finish? For example: npx prodbat done S-03 S-05 S-07")

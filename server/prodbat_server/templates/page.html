@@ -182,7 +182,7 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 {% else %}
 <div class="rows">
 {% for row in page.sells %}<div class="row"><span>{{ row.name }}</span><b><span class="muted">{{ row.count }} {{ 'payment' if row.count == 1 else 'payments' }}</span>&nbsp;&nbsp;{{ row.amount }}</b></div>
-{% else %}<p class="empty">No payments this week.</p>
+{% else %}{% if page.stripe == 'paying' %}<p class="empty">No payments this week.</p>{% endif %}
 {% endfor %}
 </div>
 <p class="empty">{{ page.last_payment }}</p>

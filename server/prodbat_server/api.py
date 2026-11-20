@@ -430,6 +430,8 @@ async def post_stripe(request: Request) -> dict:
         raise HTTPException(400, "Send the Stripe event object as JSON.")
     async with request.app.state.sessions() as db:
         project = await project_for(request, db, from_server=True)
+        if project.stripe_seen_at is None:
+            project.stripe_seen_at = dt.datetime.now(dt.UTC)
         for payment in payments:
             ref = payment.pop("ref")
             source = await source_of(db, project, ref) if ref else None

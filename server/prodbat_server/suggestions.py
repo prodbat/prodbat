@@ -19,7 +19,8 @@ SUGGESTIONS = [
         "id": "S-01",
         "title": "Count payments by product",
         "pitch": "We could also show what people pay for, from Stripe.",
-        "applies": "select not exists (select 1 from payments where project_id = :p)",
+        "applies": "select not exists (select 1 from payments where project_id = :p) "
+                   "and (select stripe_seen_at from projects where id = :p) is null",
         "steps": """\
 This project takes payments with Stripe and already has a webhook handler. Prodbat can show what sells
 if that handler forwards each event it receives.
