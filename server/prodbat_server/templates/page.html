@@ -57,7 +57,12 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .problem { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--soft-line); }
 .problem svg { flex: none; margin-top: 1px; }
 .problem > div { min-width: 0; overflow-wrap: anywhere; }
-.problem strong { font-weight: 600; }
+.problem strong { font-weight: 600; display: block; margin-bottom: 2px; }
+.problem .detail { color: var(--muted); font-size: 15px; }
+.problem .actions { margin-top: 14px; gap: 6px 14px; }
+.problem .actions form { display: contents; }
+.problem .actions button { align-self: center; }
+.problem .actions button.quiet { padding: 0 4px; }
 .nothing { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--green-tint); color: #123F28; font-weight: 500; border-radius: 10px; }
 .empty { margin: 0; color: var(--muted); font-size: 15px; }
 pre { margin: 0; background: var(--ink); color: #E9ECE6; border-radius: 10px; padding: 16px 18px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 'JetBrains Mono', ui-monospace, monospace; }
@@ -166,9 +171,9 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 <h2>What is broken</h2>
 {% if page.problems %}
 <div class="rows">
-{% for problem in page.problems %}<div class="problem">{% if problem.level == 'broken' %}{{ cross(22) }}{% elif problem.level == 'look' %}{{ warn(22) }}{% else %}{{ ring(22) }}{% endif %}<div><strong>{{ problem.title }}</strong> {{ problem.detail }}{% if problem.todo and problem.level == 'look' %} {{ problem.todo }}{% endif %}
+{% for problem in page.problems %}<div class="problem">{% if problem.level == 'broken' %}{{ cross(22) }}{% elif problem.level == 'look' %}{{ warn(22) }}{% else %}{{ ring(22) }}{% endif %}<div><strong>{{ problem.title }}</strong><span class="detail">{{ problem.detail }}{% if problem.todo and problem.level == 'look' %} {{ problem.todo }}{% endif %}</span>
 {% if problem.id and problem is not sameas broken %}{% if prompts.get(problem.id) %}<pre id="prompt-{{ problem.id }}" hidden>{{ prompts[problem.id] }}</pre>{% endif %}
-<div class="actions">{% if prompts.get(problem.id) %}{{ copy_button('prompt-' ~ problem.id, 'Copy prompt') }}{% endif %}<form method="post" action="/d/{{ token }}/mute/{{ problem.id }}"><button class="quiet">This is fine, stop telling me</button></form></div>{% endif %}</div></div>
+<div class="actions">{% if prompts.get(problem.id) %}{{ copy_button('prompt-' ~ problem.id, 'Copy prompt', 'small primary') }}{% endif %}<form method="post" action="/d/{{ token }}/mute/{{ problem.id }}"><button class="quiet">This is fine, stop telling me</button></form></div>{% endif %}</div></div>
 {% endfor %}
 </div>
 {% else %}
