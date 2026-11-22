@@ -63,9 +63,9 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         places = await test_destinations(db, project, settings) if sent == "test" else ""
         summary = await gather(db, project, dt.datetime.now(dt.UTC))
         broken = next((p for p in summary.problems if p.level == "broken" and p.id), None)
-        prompt = None
-        if broken:
-            prompt = agent_prompt(project, await db.get(Incident, broken.id))
+        # A prompt for the coding agent for every open problem, each naming its own task.
+        prompts = {p.id: agent_prompt(project, await db.get(Incident, p.id)) for p in summary.problems if p.id}
+        prompt = prompts.get(broken.id) if broken else None
         emailed = await db.scalar(select(Email.id).where(Email.project_id == project.id).limit(1)) is not None
         checks = await db.scalar(select(func.count()).select_from(SiteCheck)
                                  .where(SiteCheck.project_id == project.id)) or 0
@@ -100,7 +100,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
     setup = setup_steps(project, summary, emailed)
     return templates.TemplateResponse(request, "page.html", {
         "page": summary, "token": token, "script_tag": script_tag(settings, project), "broken": broken,
-        "prompt": prompt, "alert_email": project.alert_email, "notice": notice, "setup": setup,
+        "prompt": prompt, "prompts": prompts, "alert_email": project.alert_email, "notice": notice, "setup": setup,
         "unfinished": [s for s in setup if not s["done"] and s.get("later")],
         "paused": project.paused_at is not None, "checks": checks, "deps": deps,
         "since": f"{project.created_at:%-d %b}", "stalled": stalled(project),

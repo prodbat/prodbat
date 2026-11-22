@@ -167,7 +167,8 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 {% if page.problems %}
 <div class="rows">
 {% for problem in page.problems %}<div class="problem">{% if problem.level == 'broken' %}{{ cross(22) }}{% elif problem.level == 'look' %}{{ warn(22) }}{% else %}{{ ring(22) }}{% endif %}<div><strong>{{ problem.title }}</strong> {{ problem.detail }}{% if problem.todo and problem.level == 'look' %} {{ problem.todo }}{% endif %}
-{% if problem.id and problem is not sameas broken %}<form method="post" action="/d/{{ token }}/mute/{{ problem.id }}"><button class="quiet">This is fine, stop telling me</button></form>{% endif %}</div></div>
+{% if problem.id and problem is not sameas broken %}{% if prompts.get(problem.id) %}<pre id="prompt-{{ problem.id }}" hidden>{{ prompts[problem.id] }}</pre>{% endif %}
+<div class="actions">{% if prompts.get(problem.id) %}{{ copy_button('prompt-' ~ problem.id, 'Copy prompt') }}{% endif %}<form method="post" action="/d/{{ token }}/mute/{{ problem.id }}"><button class="quiet">This is fine, stop telling me</button></form></div>{% endif %}</div></div>
 {% endfor %}
 </div>
 {% else %}

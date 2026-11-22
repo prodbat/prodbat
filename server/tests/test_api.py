@@ -143,6 +143,7 @@ def test_stripe_shows_as_connected_before_the_first_payment(client, db, project,
     assert "forwards its events" not in text and "not connected" not in text
     assert "Your coding agent set up Stripe forwarding." in text
     assert "Set up; waiting for the first payment" in text
+    assert "suggestions S-01" not in text  # finished, so not offered again
 
     # Any forwarded event, even one that is not a payment, shows Stripe is connected.
     client.post("/api/stripe", json={"type": "customer.created", "data": {"object": {}}}, headers=key)
@@ -150,6 +151,19 @@ def test_stripe_shows_as_connected_before_the_first_payment(client, db, project,
     assert "Stripe is connected. No payments have come in yet" in text
     assert "Stripe is connected; no payments yet" in text and "No payments this week." not in text
     assert "S-01" not in text  # the setup item counts as done
+
+
+def test_every_open_problem_has_a_prompt_for_its_own_task(client, db, project):
+    db.add(view(project, "someone", "/", "ChatGPT", "ai"))
+    incident = Incident(project_id=project.id, kind="runtime", key="runtime/node", level="look", started_at=NOW,
+                        title="Node.js 20 no longer gets security fixes", what="w", who="w",
+                        data={"ecosystem": "runtime", "name": "node"})
+    db.add(incident)
+    db.commit()
+    r = client.get(f"/d/{project.page_token}")
+    assert f'data-copy="prompt-{incident.id}"' in r.text
+    assert f"Run `npx prodbat task T{incident.id}` in this project" in r.text
+    assert f"then run `npx prodbat done T{incident.id}`." in r.text
 
 
 def test_product_names_are_read_from_invoice_lines():

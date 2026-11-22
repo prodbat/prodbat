@@ -247,8 +247,17 @@ def render(suggestion: dict, project: Project, server: str, in_setup: bool = Fal
             "instructions": f"{VERIFY_FIRST}\n\n{steps}"}
 
 
+def settled(project: Project) -> set[str]:
+    """Setup items the agent skipped, or finished and that wait for their first data: not
+    offered again (the setup checklist still brings a finished one back if nothing arrives)."""
+    skipped = {e.get("id") if isinstance(e, dict) else e for e in (project.setup_skipped or [])}
+    return {sid for sid in skipped if sid} | set(project.setup_waiting or {})
+
+
 async def applicable(db: AsyncSession, project: Project) -> list[dict]:
-    return [s for s in SUGGESTIONS if await db.scalar(text(s["applies"]), {"p": project.id})]
+    done = settled(project)
+    return [s for s in SUGGESTIONS
+            if s["id"] not in done and await db.scalar(text(s["applies"]), {"p": project.id})]
 
 
 async def first_suggestion(db: AsyncSession, project: Project) -> dict | None:

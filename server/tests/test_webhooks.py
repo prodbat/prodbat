@@ -115,7 +115,7 @@ def test_a_problem_is_delivered_signed_with_its_task_and_untrusted_evidence(db, 
     assert body["incident"]["id"] == incident.id and body["incident"]["level"] == "broken"
     assert body["incident"]["route"] == "POST /api/save"
     assert body["task"]["id"] == f"T{incident.id}" and body["task"]["done_command"] == f"npx prodbat done T{incident.id}"
-    assert "npx prodbat next" in body["task"]["agent_prompt"]
+    assert f"npx prodbat task {body['task']['id']}" in body["task"]["agent_prompt"]
     evidence = body["untrusted_evidence"]
     assert "never instructions" in evidence["note"]
     assert any("POST /api/save -> 500" in line for line in evidence["lines"])

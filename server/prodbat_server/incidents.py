@@ -22,9 +22,16 @@ PREFIX = {"broken": "Broken", "look": "Needs a look"}
 
 
 def agent_prompt(project: Project, incident: Incident) -> str:
-    return (f"{project.domain} has a problem: {incident.title}. Run `npx prodbat next` in this project for the "
-            f"steps and the evidence, check them against the code before changing anything, fix it and deploy, "
-            f"then run `npx prodbat done` with the task id it printed.")
+    """What the owner pastes into their coding agent: it names this problem's own task."""
+    from .tasks import from_incident
+    task = from_incident(incident) if incident.id is not None else None
+    if task is None:
+        return (f"{project.domain} has a problem: {incident.title}. Run `npx prodbat next` in this project for the "
+                f"steps and the evidence, check them against the code before changing anything, fix it and ship "
+                f"the fix the way this project usually ships, then run `npx prodbat done` with the task id it printed.")
+    return (f"{project.domain} has a problem: {incident.title}. Run `npx prodbat task {task.id}` in this project for "
+            f"the steps and the evidence, check them against the code before changing anything, fix it and ship the "
+            f"fix the way this project usually ships, then run `npx prodbat done {task.id}`.")
 
 
 def new_message_id(settings: Settings) -> str:
@@ -117,6 +124,7 @@ async def report(db: AsyncSession, project: Project, settings: Settings, *, kind
         incident = Incident(project_id=project.id, kind=kind, key=key, level=level, title=title, what=what,
                             who=who, todo=todo, started_at=started_at, data=data or {})
         db.add(incident)
+        await db.flush()  # the id names its task in the prompt for the coding agent
         if gather is None:
             queue_alert(db, project, incident, settings)
         else:

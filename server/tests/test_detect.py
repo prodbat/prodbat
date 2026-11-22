@@ -27,7 +27,7 @@ def test_a_route_failing_for_three_visitors_is_broken_and_emailed_once(client, d
     order = [email.body.index(q) for q in ("What broke:", "Since when:", "Who is affected:", "What to do:")]
     assert order == sorted(order)
     assert "answered with an error (500) for 3 visitors in the last 15 minutes" in email.body
-    assert "Run `npx prodbat next`" in email.body and "`npx prodbat done`" in email.body
+    assert f"Run `npx prodbat task T{incident.id}`" in email.body and f"`npx prodbat done T{incident.id}`" in email.body
     assert f"https://pb.example/d/{project.page_token}" in email.body
 
     text = page_text(client, project)
