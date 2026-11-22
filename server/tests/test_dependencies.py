@@ -1,3 +1,5 @@
+import html
+import re
 """The dependencies table on the page and at GET /api/dependencies."""
 
 import datetime as dt
@@ -106,21 +108,26 @@ def seed(db, project):
     db.commit()
 
 
-def test_the_page_shows_the_dependencies_and_escapes_package_names(client, db, project, key):
+def tab_text(client, project, **params):
+    r = client.get(f"/d/{project.page_token}/dependencies", params=params)
+    assert r.status_code == 200
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", r.text.split("</style>", 1)[-1])))
+
+
+def test_the_dependencies_tab_shows_them_and_escapes_package_names(client, db, project, key):
     seed(db, project)
-    r = client.get(f"/d/{project.page_token}")
+    r = client.get(f"/d/{project.page_token}/dependencies")
     assert '<img src=x onerror="alert(1)">' not in r.text and "1.0.0<script>" not in r.text
     assert "&lt;img src=x onerror=&#34;alert(1)&#34;&gt;" in r.text and "1.0.0&lt;script&gt;" in r.text
-    text = page_text(client, project)
-    assert "Dependencies 5 packages" in text
-    assert "The list was last sent on 18 Nov 2026. 3 need a look." in text
+    assert "The list was last sent" not in page_text(client, project)  # not on the overview
+    text = tab_text(client, project)
+    assert "Dependencies 3 of 5 need a look" in text
+    assert "The list was last sent on 18 Nov 2026." in text
     assert ("Language Node.js language Support ended on 30 Apr 2026, so new security problems will not be fixed. "
             "Move to Node.js 24. 20.11.1 20.19.0 End of life") in text
     assert "express npm 1 known security problem. Version 4.20.0 fixes it. 4.17.1 5.1.0 Security problem" in text
     assert ("Packages pulled in by other packages inflight npm Its authors deprecated this version: “This module "
             "is not supported, and leaks memory”. 1.0.6 – Deprecated") in text
-    assert "1 more package pulled in by other packages has no known problem." in text
-    assert "ms npm" not in text
     assert text.index("Packages your app names express") < text.index("Outdated")  # problems first
 
     api = client.get("/api/dependencies", headers=key).json()
@@ -137,15 +144,15 @@ def test_the_page_shows_the_dependencies_and_escapes_package_names(client, db, p
 def test_before_the_list_is_sent_the_page_says_how_to_send_it(client, db, project, key):
     db.add(view(project, "a"))
     db.commit()
-    text = page_text(client, project)
-    assert "Dependencies No package list yet. Your coding agent sends it with npx prodbat deps" in text
+    text = tab_text(client, project)
+    assert "No package list yet. Your coding agent sends it with npx prodbat deps" in text
     assert client.get("/api/dependencies", headers=key).json() == {
         "sent_at": None, "total": 0, "problems": 0, "hidden_indirect": 0, "groups": []}
 
     # Sent, not yet looked up.
     client.put("/api/dependencies", headers=key, json={"packages": [
         {"ecosystem": "npm", "name": "next", "version": "15.0.0", "direct": True}]})
-    text = page_text(client, project)
+    text = tab_text(client, project)
     assert "The list was last sent on" in text and "next npm Being looked up." in text and "Checking" in text
 
 

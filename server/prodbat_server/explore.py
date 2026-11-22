@@ -5,7 +5,7 @@ stays the default; these are the tabs a Sentry or Datadog user looks for."""
 import datetime as dt
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select, text
 
 from .api import LEVELS, find_logs
@@ -301,13 +301,19 @@ async def jobs(request: Request, token: str, range: str = "24h"):
     return view(request, "jobs.html", project, token, "jobs", jobs=rows, queues=queues, range=w.key)
 
 
-# ---- packages -------------------------------------------------------------------------
+# ---- dependencies ---------------------------------------------------------------------
 
-@router.get("/d/{token}/packages", response_class=HTMLResponse)
+@router.get("/d/{token}/packages")
+async def old_packages(token: str, show: str = "all"):
+    """The tab's old address."""
+    return RedirectResponse(f"/d/{token}/dependencies" + ("?show=problems" if show == "problems" else ""), 301)
+
+
+@router.get("/d/{token}/dependencies", response_class=HTMLResponse)
 async def packages(request: Request, token: str, show: str = "all"):
-    """The same table as the page, with every indirect package listed too."""
+    """Every package, direct and indirect, with what is known against each."""
     show = "problems" if show == "problems" else "all"
     async with request.app.state.sessions() as db:
         project = await project_by_token(request, db, token)
         deps = await dependencies.table(db, project, every=True, problems_only=show == "problems")
-    return view(request, "packages.html", project, token, "packages", deps=deps, show=show)
+    return view(request, "packages.html", project, token, "dependencies", deps=deps, show=show)

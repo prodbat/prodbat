@@ -1,8 +1,8 @@
 {% extends "explore.html" %}
-{% block title %}Packages{% endblock %}
+{% block title %}Dependencies{% endblock %}
 {% block main %}
 <div class="bar">
-<h1>Packages {% if deps.total %}<span class="muted">{{ deps.problems }} of {{ "{:,}".format(deps.total) }} {{ 'needs' if deps.problems == 1 else 'need' }} a look</span>{% endif %}</h1>
+<h1>Dependencies {% if deps.total %}<span class="muted">{{ deps.problems }} of {{ "{:,}".format(deps.total) }} {{ 'needs' if deps.problems == 1 else 'need' }} a look</span>{% endif %}</h1>
 {% if deps.total %}<span class="ranges"><a href="?show=all"{% if show != 'problems' %} aria-current="true"{% endif %}>All</a><a href="?show=problems"{% if show == 'problems' %} aria-current="true"{% endif %}>Need a look</a></span>{% endif %}
 </div>
 <section class="card">

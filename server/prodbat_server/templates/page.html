@@ -81,7 +81,6 @@ code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.9em;
 #texts input, #webhook input[type=url], #github input:not([type]), #github select { font: inherit; min-height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid #B9BEB3; background: #FFF; min-width: min(260px, 100%); }
 #github input:not([type]) { width: min(520px, 100%); margin-top: 6px; }
 #github label { display: block; }
-{% include "_deps_style.html" %}
 {% include "_nav_style.html" %}
 footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
 </style>
@@ -177,7 +176,7 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 {% endfor %}
 </div>
 {% else %}
-<div class="nothing">{{ tick(22) }}Nothing has broken since {{ since }}.{% if checks %} Prodbat has loaded your site {{ "{:,}".format(checks) }} {{ 'time' if checks == 1 else 'times' }}.{% endif %}</div>
+<div class="nothing">{{ tick(22) }}{% if last_fixed %}Nothing is wrong right now. The last problem was fixed {{ last_fixed }}.{% else %}Nothing has broken since {{ since }}.{% endif %}{% if checks %} Prodbat has loaded your site {{ "{:,}".format(checks) }} {{ 'time' if checks == 1 else 'times' }}.{% endif %}</div>
 {% endif %}
 </div>
 
@@ -230,16 +229,6 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 </div>
 </section>
 {% endif %}
-
-<section class="card list" id="dependencies">
-<div class="list-head"><h2>Dependencies</h2>{% if deps.total %}<span class="muted">{{ "{:,}".format(deps.total) }} {{ 'package' if deps.total == 1 else 'packages' }}</span>{% endif %}</div>
-{% if not deps.total %}
-<p class="empty">No package list yet. Your coding agent sends it with <span class="mono">npx prodbat deps</span>, and every package is then checked each day for security problems and end of support.</p>
-{% else %}
-<p class="muted">{% if deps.sent %}The list was last sent on {{ deps.sent }}. {% endif %}{% if deps.problems %}{{ deps.problems }} {{ 'needs' if deps.problems == 1 else 'need' }} a look.{% else %}Nothing known against them.{% endif %} Your coding agent sends it again with <span class="mono">npx prodbat deps</span>.</p>
-{% include "_deps_table.html" %}
-{% endif %}
-</section>
 
 {% if page.happened or page.coming_up or page.suggestion %}
 <section class="lists">

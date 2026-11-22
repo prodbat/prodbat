@@ -82,14 +82,14 @@ def test_logs_metrics_uptime_jobs_and_packages_render_with_data(client, db, proj
     db.add(Dependency(project_id=project.id, ecosystem="npm", name="ms", version="2.1.3", latest="2.1.3",
                       direct=False, issues=[], facts_checked_at=NOW))
     db.commit()
-    packages = text_of(client, f"/d/{t}/packages")
-    assert "Packages 1 of 3 needs a look" in packages
+    packages = text_of(client, f"/d/{t}/dependencies")
+    assert "Dependencies 1 of 3 needs a look" in packages
     assert "lodash npm 1 known security problem. Version 4.17.21 fixes it. 4.17.20 4.17.21 Security problem" in packages
     assert "next npm Being looked up." in packages and "15.1.0 15.1.0 Checking" in packages
     assert "Packages pulled in by other packages ms npm 2.1.3 2.1.3 OK" in packages
-    problems = text_of(client, f"/d/{t}/packages", show="problems").split("Need a look", 1)[1]
+    problems = text_of(client, f"/d/{t}/dependencies", show="problems").split("Need a look", 1)[1]
     assert "lodash" in problems and "next npm" not in problems and "ms npm" not in problems
-    assert 'aria-current="page">Packages' in client.get(f"/d/{t}/packages").text
+    assert 'aria-current="page">Dependencies' in client.get(f"/d/{t}/dependencies").text
 
 
 def test_every_view_works_empty_and_the_overview_links_to_them(client, project):
@@ -103,10 +103,15 @@ def test_every_view_works_empty_and_the_overview_links_to_them(client, project):
 
 def test_every_page_has_the_favicon_and_the_new_mark(client, project):
     t = project.page_token
-    for path in (f"/d/{t}", f"/d/{t}/packages"):
+    for path in (f"/d/{t}", f"/d/{t}/dependencies"):
         page = client.get(path).text
         assert 'href="/static/favicon.svg"' in page and 'href="/favicon.ico"' in page
         assert 'fill="#8FDDAA"' in page  # the head with its eyes
     icon = client.get("/favicon.ico")
     assert icon.status_code == 200 and icon.headers["content-type"] == "image/x-icon"
     assert client.get("/static/favicon.svg").status_code == 200
+
+
+def test_the_old_packages_address_moves_to_dependencies(client, project):
+    r = client.get(f"/d/{project.page_token}/packages", params={"show": "problems"}, follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == f"/d/{project.page_token}/dependencies?show=problems"

@@ -48,6 +48,13 @@ def test_a_quiet_week_says_everything_is_working_with_numbers_and_lists(client, 
     assert "Saw an error 0 of 3 visitors" in text
     assert "Nothing has broken since" in text
     assert "/ 2" in text and "/pricing 2" in text
+    # Once a problem has come and gone, the page says when, not since the project began.
+    db.add(Incident(project_id=project.id, kind="server", key="s1", level="look", title="t", what="w", who="w",
+                    started_at=NOW - dt.timedelta(hours=3), ended_at=NOW - dt.timedelta(hours=2)))
+    db.commit()
+    later = page_text(client, project)
+    assert "Nothing has broken since" not in later
+    assert "Nothing is wrong right now. The last problem was fixed 2 hours ago." in later
     # Each visitor counts once, under where they first arrived from.
     assert "Google 1" in text
     assert "ChatGPT AI assistant 1" in text
