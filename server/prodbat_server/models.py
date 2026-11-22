@@ -328,6 +328,9 @@ class Incident(Base):
     # versions), so a task for a coding agent can be written from fixed
     # text and checked values instead of from sentences.
     data: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # When the coding agent said it fixed this (`npx prodbat done`). A "needs a look"
+    # failure that has not happened since, for 30 minutes, is then over.
+    fix_claimed_at: Mapped[dt.datetime | None] = timestamp()
     # Message-ID of the first email, so later ones land in the same thread.
     message_id: Mapped[str | None] = mapped_column(Text)
     # The first Slack message's timestamp, so later ones reply in its thread.

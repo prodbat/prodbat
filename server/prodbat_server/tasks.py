@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .advisories import version_key
 from .checks import check_site
 from .config import Settings
-from .detect import evaluate_project
+from .detect import QUIET_AFTER, evaluate_project
 from .flows import SAY
 from .incidents import resolve
 from . import queue, setup
@@ -400,6 +400,16 @@ async def check_task(db: AsyncSession, project: Project, settings: Settings, htt
     return result
 
 
+async def last_failure(db: AsyncSession, incident: Incident) -> dt.datetime | None:
+    """When a route or server failure last happened."""
+    d = incident.data or {}
+    if incident.kind == "route":
+        return await db.scalar(text("select max(ts) from failed_requests where project_id = :p and method = :m "
+                                    "and route = :r"), {"p": incident.project_id, "m": d.get("method"), "r": d.get("route")})
+    return await db.scalar(text("select max(ts) from server_errors where project_id = :p and fingerprint = :f"),
+                           {"p": incident.project_id, "f": incident.key})
+
+
 async def _check_task(db: AsyncSession, project: Project, settings: Settings, http, tid: str) -> dict:
     now = dt.datetime.now(dt.UTC)
 
@@ -458,12 +468,24 @@ async def _check_task(db: AsyncSession, project: Project, settings: Settings, ht
                 return answer(None, f"Prodbat now sees version {version_value(dep.version)}. It checks that version's "
                                     f"support within a minute; run `npx prodbat done {tid}` again then.")
         else:
+            if incident.kind in ("route", "server") and incident.level == "look":
+                # The agent says it is fixed: from now, 30 quiet minutes close it. If it has
+                # happened again since an earlier claim, the clock starts over.
+                last = await last_failure(db, incident)
+                if incident.fix_claimed_at is None or (last is not None and last >= incident.fix_claimed_at):
+                    incident.fix_claimed_at = now
             await evaluate_project(db, project, settings, now)
         await db.commit()
         await db.refresh(incident)
 
     if incident.ended_at is not None:
         return answer(True, f"Fixed, as far as Prodbat can see. Run `npx prodbat next` for what is left.")
+    if incident.kind in ("route", "server") and incident.fix_claimed_at is not None:
+        claimed = incident.fix_claimed_at
+        again = f"{(claimed + QUIET_AFTER):%H:%M} UTC"
+        return answer(None, f"Not yet. Prodbat calls it fixed once it has gone 30 minutes without happening again "
+                            f"after your fix (counted from {claimed:%H:%M} UTC). Run `npx prodbat done {tid}` again "
+                            f"after {again}. If it happens again before then, the 30 minutes start over.")
     waiting = {
         "route": f"Not yet. Prodbat calls it fixed after 30 minutes without a visitor hitting it. It was first seen "
                  f"{ago(incident.started_at, now)}; run `npx prodbat status` to see when it last happened.",

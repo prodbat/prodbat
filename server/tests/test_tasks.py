@@ -3,7 +3,7 @@ import re
 
 from sqlalchemy import select
 
-from prodbat_server.models import BrowserError, Dependency, Incident, Job
+from prodbat_server.models import BrowserError, Dependency, Incident, Job, ServerError
 from prodbat_server.tasks import path_value, where_value
 
 from .helpers import NOW, SETTINGS, emails, evaluate, failure, http_client, minutes_ago, run, run_checks, run_jobs
@@ -157,6 +157,52 @@ def test_a_failing_route_is_too_early_to_call_and_a_job_is_fixed_when_it_checks_
 
     assert client.post("/api/tasks/T999999/check", headers=key).status_code == 404
     assert client.get("/api/tasks/nonsense", headers=key).status_code == 404
+
+
+def test_a_failure_that_needs_a_look_is_fixed_30_minutes_after_the_agent_says_so(client, db, project, key):
+    def error(ts):
+        return ServerError(project_id=project.id, fingerprint="s1", kind="HTTP 502", message="", status=502,
+                           route="POST /api/preview", where="", trace="", ts=ts)
+    db.add_all([error(NOW - dt.timedelta(hours=h)) for h in (20, 19, 18)])
+    evaluate(db)
+    incident = db.scalar(select(Incident).where(Incident.kind == "server"))
+    assert incident.level == "look"
+    tid = f"T{incident.id}"
+
+    # Without the claim, it would stay open until the failures are a day old.
+    first = client.post(f"/api/tasks/{tid}/check", headers=key).json()
+    assert first["fixed"] is None and "30 minutes without happening again after your fix" in first["text"]
+    db.refresh(incident)
+    claimed = incident.fix_claimed_at
+    assert claimed is not None
+
+    # Asking again does not restart the clock.
+    client.post(f"/api/tasks/{tid}/check", headers=key)
+    db.refresh(incident)
+    assert incident.fix_claimed_at == claimed
+
+    # 31 minutes on, nothing since: fixed.
+    incident.fix_claimed_at = NOW - dt.timedelta(minutes=31)
+    db.commit()
+    assert client.post(f"/api/tasks/{tid}/check", headers=key).json()["fixed"] is True
+
+
+def test_a_failure_after_the_claimed_fix_starts_the_30_minutes_over(client, db, project, key):
+    def error(ts):
+        return ServerError(project_id=project.id, fingerprint="s1", kind="HTTP 502", message="", status=502,
+                           route="POST /api/preview", where="", trace="", ts=ts)
+    db.add(error(NOW - dt.timedelta(hours=20)))
+    evaluate(db)
+    incident = db.scalar(select(Incident).where(Incident.kind == "server"))
+    incident.fix_claimed_at = NOW - dt.timedelta(minutes=40)
+    db.add(error(minutes_ago(10)))  # it happened again after the fix
+    db.commit()
+    evaluate(db)
+    db.refresh(incident)
+    assert incident.ended_at is None
+    client.post(f"/api/tasks/T{incident.id}/check", headers=key)
+    db.refresh(incident)
+    assert incident.fix_claimed_at > NOW - dt.timedelta(minutes=1)  # the clock starts over
 
 
 def test_a_domain_about_to_lapse_is_a_task_for_the_user_not_the_agent(client, db, project, key):

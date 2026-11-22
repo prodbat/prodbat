@@ -68,6 +68,13 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
         .group_by(Incident.kind, Incident.key))}
     still_wrong: set[tuple[str, str]] = set()
 
+    async def fixed_since_claim(existing, query, params) -> bool:
+        """The agent said it fixed this at least QUIET_AFTER ago, and it has not happened since."""
+        claimed = existing.fix_claimed_at if existing else None
+        if claimed is None or now - claimed < QUIET_AFTER:
+            return False
+        return not await db.scalar(text(query), {**params, "p": project.id, "claimed": claimed})
+
     async def say(kind, key, **fields):
         still_wrong.add((kind, key))
         fields.setdefault("data", {"name": key})
@@ -100,6 +107,9 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
             still_wrong.add(("route", key))  # fewer people hitting it, but not quiet yet
         elif existing and existing.level == "broken":
             pass  # quiet: closed below with a "working again"
+        elif await fixed_since_claim(existing, """select exists (select 1 from failed_requests where project_id = :p
+                and method = :m and route = :r and ts >= :claimed)""", {"m": r.method, "r": r.route}):
+            pass  # the agent's fix has held: closed below
         elif v >= LOOK_VISITORS:
             await say("route", key, reach=r.v, level="look", title=f"{key} {did}",
                       what=f"{key} {did} {plural(r.n, 'time')} in the last 24 hours.", who=who,
@@ -149,6 +159,9 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
             still_wrong.add(("server", r.fingerprint))
         elif existing and existing.level == "broken":
             pass
+        elif await fixed_since_claim(existing, """select exists (select 1 from server_errors where project_id = :p
+                and fingerprint = :f and ts >= :claimed)""", {"f": r.fingerprint}):
+            pass  # the agent's fix has held: closed below
         elif n >= 1:
             await say("server", r.fingerprint, reach=r.n, level="look", title=f"{on} failed",
                       what=f"{on} failed {plural(r.n, 'time')} in the last 24 hours. Cause: {cause}.",
