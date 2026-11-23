@@ -52,6 +52,13 @@ QUIET_BROKEN_CHANCE = 1e-5
 # Too little history says nothing: at least this many events over this long.
 QUIET_MIN_EVENTS = {"payments": 8, "visitors": 50}
 QUIET_MIN_SPAN = dt.timedelta(days=3)
+# Visits, not page views: a visitor's page views count once until they have
+# been away this long. Counting page views made a site with three visitors a
+# day look like one with a visit every hour.
+VISIT_GAP = dt.timedelta(minutes=30)
+# Quiet nights are normal on small sites: a silence must also be this many
+# times longer than the longest one in the baseline.
+QUIET_LONGEST_FACTOR = 1.5
 
 MANAGED = ("route", "error", "server", "job", "queue", "quiet")
 
@@ -237,28 +244,39 @@ async def went_quiet(db: AsyncSession, project: Project, stream: str, table: str
     """If `stream` has been silent for longer than its usual rate explains,
     the fields for a problem; otherwise None. Assumes events arrive at an even
     rate (Poisson), which overstates the surprise of a quiet night, so the
-    chance threshold is strict."""
+    chance threshold is strict, and a silence no longer than the longest one
+    in the baseline (a quiet night) never counts."""
+    if stream == "visitors":  # one arrival per visit: a page view after the visitor was away VISIT_GAP
+        starts = f"""select ts from (select ts, lag(ts) over (partition by visitor order by ts) prev from {table}
+                      where project_id = :p and ts >= :since) v
+                     where prev is null or ts - prev > :visit_gap"""
+    else:
+        starts = f"select ts from {table} where project_id = :p and ts >= :since"
+    params = {"p": project.id, "since": now - QUIET_BASELINE, "visit_gap": VISIT_GAP}
     row = (await db.execute(text(f"""
-        select count(*) n, min(ts) first, max(ts) last from {table}
-        where project_id = :p and ts >= :since"""), {"p": project.id, "since": now - QUIET_BASELINE})).one()
+        select count(*) n, min(ts) first, max(gap) longest,
+               (select max(ts) from {table} where project_id = :p and ts >= :since) last
+        from (select ts, ts - lag(ts) over (order by ts) gap from ({starts}) s) g"""), params)).one()
     if row.n < QUIET_MIN_EVENTS[stream] or row.last - row.first < QUIET_MIN_SPAN:
         return None
-    gap = (row.last - row.first).total_seconds() / (row.n - 1)  # the usual time between events
+    gap = (row.last - row.first).total_seconds() / (row.n - 1)  # the usual time between arrivals
     silence = (now - row.last).total_seconds()
+    longest = row.longest.total_seconds() if row.longest else 0
     chance = math.exp(-silence / gap)
-    if chance >= QUIET_LOOK_CHANCE:
+    if chance >= QUIET_LOOK_CHANCE or silence <= QUIET_LONGEST_FACTOR * longest:
         return None
     level = "broken" if chance < QUIET_BROKEN_CHANCE else "look"
     usual = lasted(gap)
+    before = f" The longest quiet stretch in the last 4 weeks was {lasted(longest)}." if longest >= HOUR.total_seconds() else ""
     if stream == "payments":
         return {"level": level, "title": "Payments have stopped",
-                "what": f"The last payment came in {ago(row.last, now)}. You normally get one about every {usual}.",
+                "what": f"The last payment came in {ago(row.last, now)}. You normally get one about every {usual}.{before}",
                 "who": "Anyone trying to pay.",
                 "todo": "Try buying something yourself, and look in Stripe for failed payments or webhook deliveries; "
                         "or paste the line below into your coding agent.",
                 "started_at": row.last, "data": {"stream": stream, "usual_seconds": int(gap)}}
     return {"level": level, "title": "Visitors have stopped being counted",
-            "what": f"The last visit was counted {ago(row.last, now)}. You normally get one about every {usual}. "
+            "what": f"The last visit was counted {ago(row.last, now)}. You normally get one about every {usual}.{before} "
                     "Either the site is not reaching people, or the Prodbat script was removed in a deploy.",
             "who": "Possibly every visitor.",
             "todo": "Open your site and check it loads, and that the Prodbat script tag is still in the page; "

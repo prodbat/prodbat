@@ -56,6 +56,36 @@ def test_too_little_history_never_alerts(db, project):
     assert open_quiet(db) == {}
 
 
+def small_site(project, days: int, last: dt.datetime):
+    """Three visitors a day, four hours apart, each looking at eight pages over a few minutes; the
+    last visit starts at `last`, and each night is 16 hours without one."""
+    views = []
+    for d in range(days):
+        for h in (0, 4, 8):
+            start = last - dt.timedelta(days=d, hours=h)
+            views += [Pageview(project_id=project.id, visitor=f"v{d}-{h}", path=f"/p{i}", source=None,
+                               source_kind="direct", ts=start + dt.timedelta(minutes=i)) for i in range(8)]
+    return views
+
+
+def test_a_quiet_night_on_a_small_site_is_not_a_problem(db, project):
+    # 3 visits a day (24 page views), and nobody for the 14 hours since the last.
+    db.add_all(small_site(project, 28, NOW - dt.timedelta(hours=14)))
+    db.commit()
+    evaluate(db)
+    assert "visitors" not in open_quiet(db)
+
+    # Three whole days with no visit at all is still worth a look.
+    db.query(Pageview).delete()
+    db.add_all(small_site(project, 28, NOW - dt.timedelta(days=3)))
+    db.commit()
+    evaluate(db)
+    incident = open_quiet(db)["visitors"]
+    assert incident.level == "look"
+    assert "You normally get one about every 8 hours. The longest quiet stretch in the last 4 weeks was 16 hours." \
+        in incident.what
+
+
 def test_visits_that_stop_point_at_the_script_or_the_site(db, project, client, key):
     db.add_all([Pageview(project_id=project.id, visitor=f"v{i}", path="/", source=None, source_kind="direct",
                          ts=NOW - dt.timedelta(hours=8) - dt.timedelta(minutes=10 * i)) for i in range(600)])
