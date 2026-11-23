@@ -3,7 +3,7 @@ import hashlib
 import secrets
 import uuid
 
-from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, ForeignKey, Identity, Index, LargeBinary, Text, UniqueConstraint, func, text
+from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, ForeignKey, Identity, Index, Integer, LargeBinary, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -208,6 +208,18 @@ class Pageview(Base):
     # A short reference the site can pass to Stripe so a payment can be
     # traced back to this visit's source.
     ref: Mapped[str | None] = mapped_column(Text)
+
+
+class VisitHour(Base):
+    """Visits that began in each completed hour (UTC), the record a site's
+    normal traffic is learned from (see traffic.py). Hours with none are not
+    stored. Kept for a few weeks, apart from how long page views are kept."""
+
+    __tablename__ = "visit_hours"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    hour: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    visits: Mapped[int] = mapped_column(Integer)
 
 
 class BrowserError(Base):

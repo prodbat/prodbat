@@ -4,6 +4,7 @@ python -m prodbat_server migrate | serve | worker    the same pieces, separately
 python -m prodbat_server probe                     checks from another region (PRODBAT_REGION)
 python -m prodbat_server vapid-keys                a key pair for phone notifications (web push)
 python -m prodbat_server telegram-webhook          tell Telegram where to send the bot's messages
+python -m prodbat_server replay-quiet [--site d]   what each "visitors have stopped" rule would have said
 """
 
 import argparse
@@ -106,6 +107,10 @@ def main(argv: list[str] | None = None) -> None:
     commands.add_parser("probe", help="check sites from another region (set PRODBAT_REGION); never alerts")
     commands.add_parser("vapid-keys", help="print a new key pair for phone notifications (web push)")
     commands.add_parser("telegram-webhook", help="point the Telegram bot at this server (the worker also does this)")
+    replay = commands.add_parser("replay-quiet", help="what each 'visitors have stopped' rule would have said "
+                                                      "over real history; reads only")
+    replay.add_argument("--days", type=int, default=28)
+    replay.add_argument("--site", help="one domain")
     for name, text in (("serve", "the web server only"), ("run", "migrate, then the web server and the worker together")):
         sub = commands.add_parser(name, help=text)
         sub.add_argument("--host", default="0.0.0.0")
@@ -130,6 +135,10 @@ def main(argv: list[str] | None = None) -> None:
         print("PRODBAT_VAPID_SUBJECT=mailto:you@example.com")
     elif args.command == "telegram-webhook":
         asyncio.run(telegram_webhook())
+    elif args.command == "replay-quiet":
+        from .traffic import replay_all
+
+        asyncio.run(replay_all(Settings(), args.days, args.site))
     elif args.command == "probe":
         from .probe import probe
 

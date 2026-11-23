@@ -16,7 +16,7 @@ import psycopg
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from . import facts, queue
+from . import facts, queue, traffic
 from .app import load_extensions
 from .setup_emails import send_setup_emails
 from .github import send_pending_github
@@ -137,6 +137,8 @@ async def worker(settings: Settings | None = None) -> None:
                     await send_setup_emails(sessions, settings)
                 for module in extensions:
                     await module.tick(sessions, settings, client)
+                if due("traffic", 600):
+                    await traffic.roll_up_all(sessions)
                 if due("slow", 900):
                     await refresh_expiry(sessions, client, settings)
                     await send_weekly(sessions, settings)

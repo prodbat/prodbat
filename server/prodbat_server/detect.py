@@ -16,6 +16,7 @@ from .config import Settings
 from .flows import SAY, flow_for
 from .incidents import report, resolve
 from .models import Incident, Job, Project
+from .traffic import VISIT_GAP
 from .words import ago, every, lasted, plural
 
 DAY = dt.timedelta(days=1)
@@ -52,10 +53,8 @@ QUIET_BROKEN_CHANCE = 1e-5
 # Too little history says nothing: at least this many events over this long.
 QUIET_MIN_EVENTS = {"payments": 8, "visitors": 50}
 QUIET_MIN_SPAN = dt.timedelta(days=3)
-# Visits, not page views: a visitor's page views count once until they have
-# been away this long. Counting page views made a site with three visitors a
-# day look like one with a visit every hour.
-VISIT_GAP = dt.timedelta(minutes=30)
+# Visits, not page views (traffic.VISIT_GAP): counting page views made a site
+# with three visitors a day look like one with a visit every hour.
 # Quiet nights are normal on small sites: a silence must also be this many
 # times longer than the longest one in the baseline.
 QUIET_LONGEST_FACTOR = 1.5
