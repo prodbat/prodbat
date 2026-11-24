@@ -8,10 +8,15 @@
 .views a { padding: 8px 10px; border-radius: 8px; color: #555C63; font-size: 14px; font-weight: 500; text-decoration: none; }
 .views a:hover { background: #E2E5DD; color: #15181B; }
 .views a[aria-current="page"] { background: #FFFFFF; color: #15181B; box-shadow: 0 0 0 1px #DADDD5; }
+.side .account { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 12px; border-top: 1px solid #DADDD5; }
+.side .account a { padding: 6px 10px; border-radius: 8px; color: #555C63; font-size: 13px; text-decoration: none; }
+.side .account a:hover { background: #E2E5DD; color: #15181B; }
 @media (max-width: 800px) {
   .shell { display: block; }
-  .side { position: static; height: auto; gap: 8px; padding: 12px 0 0; border-right: 0; border-bottom: 1px solid #DADDD5; }
+  .side { position: relative; height: auto; gap: 8px; padding: 12px 0 0; border-right: 0; border-bottom: 1px solid #DADDD5; }
   .side .brand { padding: 4px 14px; }
+  .side:has(.account) .brand { padding-right: 170px; }
   .views { flex-direction: row; overflow-x: auto; padding: 0 10px 10px; }
   .views a { white-space: nowrap; }
+  .side .account { position: absolute; top: 10px; right: 10px; flex-direction: row; margin: 0; padding: 0; border: 0; }
 }

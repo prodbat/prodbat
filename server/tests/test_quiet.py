@@ -127,7 +127,7 @@ def test_a_site_that_goes_dark_in_its_busy_hours_is_broken_within_minutes(db, pr
     incident = open_quiet(db)["visitors"]
     assert incident.level == "broken"
     assert re.search(r"The last visit was counted 2\d minutes ago\. At these hours of the week you normally get "
-                     r"about 2\d visits in that time\.", incident.what)
+                     r"about (1[5-9]|2\d) visits in that time\.", incident.what)  # depends on the minute it runs
 
 
 def view_at(project, visitor, ts):

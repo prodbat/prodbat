@@ -5,4 +5,7 @@
 <nav class="views" aria-label="Views">
 {% for key, label in (('overview', 'Overview'), ('errors', 'Errors'), ('logs', 'Logs'), ('metrics', 'Metrics'), ('uptime', 'Uptime'), ('jobs', 'Jobs'), ('dependencies', 'Dependencies')) %}<a href="/d/{{ token }}{% if key != 'overview' %}/{{ key }}{% endif %}"{% if current == key %} aria-current="page"{% endif %}>{{ label }}</a>
 {% endfor %}</nav>
+{% set account = request.app.state.account_links if request is defined else [] %}{% if account %}<nav class="account" aria-label="Account">
+{% for href, label in account %}<a href="{{ href }}">{{ label }}</a>
+{% endfor %}</nav>{% endif %}
 </aside>

@@ -38,6 +38,9 @@ def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None 
     # Optional: async (request, project) -> Response | None, asked before a
     # project's page is shown. An extension sets it to put pages behind sign-in.
     app.state.page_guard = None
+    # Optional: (href, label) links at the foot of a page's side menu, such as
+    # an extension's list of sites and sign out. None on a self-hosted server.
+    app.state.account_links = []
     # Extensions first, so their routes win where both define one.
     for module in load_extensions(settings):
         module.setup(app)
