@@ -158,6 +158,20 @@ def test_the_wsgi_and_django_middleware_report_too(server):
 
     middleware = prodbat.django.Middleware(view)
     assert middleware(request).status_code == 500
+
+    # Http404 and the like become a 404 page: the site working normally, not reported.
+    class Http404(Exception):
+        pass
+
+    def not_found(request):
+        try:
+            raise Http404("No product matches the given query.")
+        except Http404 as exc:
+            not_found_middleware.process_exception(request, exc)
+        return Answer(404)
+
+    not_found_middleware = prodbat.django.Middleware(not_found)
+    assert not_found_middleware(Request()).status_code == 404
     assert prodbat.django.Middleware(lambda request: Answer(504))(Request()).status_code == 504
     assert prodbat.django.Middleware(lambda request: Answer(200))(Request()).status_code == 200
     prodbat.flush()

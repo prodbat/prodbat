@@ -479,6 +479,30 @@ class ErrorReport(BaseModel):
 FRAME = re.compile(r"\(?((?:/|[A-Za-z]:\\|webpack|file:)[^\s():]*):(\d+):\d+\)?")
 
 
+# Exceptions that frameworks answer with a 404, 403 or 400 rather than a crash:
+# the site saying "not found" or "not allowed", which is not its server failing.
+# Older versions of the libraries reported them; they are dropped here.
+CLIENT_ERRORS = frozenset({
+    # Django
+    "Http404", "PermissionDenied", "SuspiciousOperation", "DisallowedHost", "DisallowedRedirect",
+    "SuspiciousFileOperation", "SuspiciousMultipartForm", "RequestDataTooBig", "TooManyFieldsSent",
+    "TooManyFilesSent", "BadRequest",
+    # Rails
+    "ActiveRecord::RecordNotFound", "ActionController::RoutingError", "AbstractController::ActionNotFound",
+    "ActionController::UnknownFormat", "ActionController::InvalidAuthenticityToken",
+    "ActionController::InvalidCrossOriginRequest", "ActionController::ParameterMissing",
+    "ActionController::BadRequest", "ActionController::MethodNotAllowed", "ActionController::UnknownHttpMethod",
+    "ActionDispatch::Http::Parameters::ParseError", "ActionDispatch::Http::MimeNegotiation::InvalidType",
+})
+# Next.js signals notFound(), redirect() and the like by throwing these.
+NEXT_SIGNALS = ("NEXT_NOT_FOUND", "NEXT_REDIRECT", "NEXT_HTTP_ERROR_FALLBACK")
+
+
+def is_client_error(body: "ErrorReport") -> bool:
+    return (body.kind in CLIENT_ERRORS or (body.status is not None and 400 <= body.status < 500)
+            or body.message.startswith(NEXT_SIGNALS))
+
+
 @router.post("/errors", status_code=202)
 async def post_error(request: Request, body: ErrorReport) -> dict:
     # A route is "POST /path" or "/path"; anything else is not a route.
@@ -495,6 +519,9 @@ async def post_error(request: Request, body: ErrorReport) -> dict:
     async with request.app.state.sessions() as db:
         project = await project_for(request, db, from_server=True)
         request.app.state.limiter.check("errors", str(project.id), 600, 60)
+        if is_client_error(body):
+            return {"ok": True,
+                    "ignored": "A 404 or other 4xx answer is the site working normally, not a server error."}
         db.add(ServerError(project_id=project.id, fingerprint=fingerprint, kind=body.kind, message=body.message,
                            route=route, where=where, trace=body.trace, status=body.status))
         await db.commit()

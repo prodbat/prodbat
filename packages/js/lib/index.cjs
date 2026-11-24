@@ -95,6 +95,16 @@ function captureException(err, options = {}) {
   } catch { /* never throw */ }
 }
 
+// Errors a framework answers with a 404, 403 or 400 (http-errors, body-parser,
+// Next.js notFound() and redirect()): the site working normally, not reported.
+const NEXT_SIGNALS = /^NEXT_(NOT_FOUND|REDIRECT|HTTP_ERROR_FALLBACK)/;
+function isClientError(err) {
+  if (!err || typeof err !== 'object') return false;
+  const status = Number(err.status || err.statusCode);
+  if (status >= 400 && status < 500) return true;
+  return NEXT_SIGNALS.test(String(err.digest || '')) || NEXT_SIGNALS.test(String(err.message || ''));
+}
+
 // A 5xx answer that did not come from an exception.
 function captureStatus(status, route = '') {
   if (status >= 500) send('POST', '/api/errors', { kind: `HTTP ${status}`, status, route: String(route).slice(0, 300) });
@@ -179,11 +189,14 @@ function express() {
   };
 }
 
-// Express: put after the routes. Reports the exception with its stack, then passes it on.
+// Express: put after the routes. Reports the exception with its stack, then passes it on;
+// one carrying a 4xx status (a 404 from http-errors, a bad body) is passed on unreported.
 function expressErrorHandler() {
   return function prodbatErrorHandler(err, req, res, next) {
-    req.prodbatReported = true;
-    captureException(err, { route: routeOf(req) });
+    if (!isClientError(err)) {
+      req.prodbatReported = true;
+      captureException(err, { route: routeOf(req) });
+    }
     next(err);
   };
 }
@@ -214,6 +227,7 @@ function wrap(handler) {
       if (pending.size || logs.length) keepAlive(flush(5000), rest);
       return response;
     } catch (err) {
+      if (isClientError(err)) throw err;
       captureException(err, { route });
       await flush(1000); // a serverless function may be frozen as soon as it throws
       throw err;
@@ -223,6 +237,7 @@ function wrap(handler) {
 
 // Next.js 15+: `export { onRequestError } from 'prodbat'` in instrumentation.ts.
 async function onRequestError(err, request) {
+  if (isClientError(err)) return;
   captureException(err, { route: request ? `${request.method || ''} ${request.path || ''}`.trim() : '' });
   await flush(1000);
 }

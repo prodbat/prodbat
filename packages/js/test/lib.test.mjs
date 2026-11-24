@@ -69,6 +69,9 @@ test('express: an exception is reported once with its stack, and any other 5xx b
   respond(request('GET', '/api/upstream'), 502);
   respond(request('GET', '/api/fine'), 200);
   respond(request('GET', '/api/missing'), 404);
+  // A 404 or a bad body passed to next() is the site answering normally: not reported.
+  respond(request('GET', '/product/nope'), 404, Object.assign(new Error('Not Found'), { status: 404 }));
+  respond(request('POST', '/api/save'), 400, Object.assign(new SyntaxError('Unexpected token'), { statusCode: 400 }));
   await prodbat.flush();
   assert.deepEqual(sent('/api/errors').map((r) => [r.body.route, r.body.kind]), [['POST /api/checkout', 'Error'], ['GET /api/upstream', 'HTTP 502']]);
 });
@@ -81,6 +84,10 @@ test('wrap: a handler that throws or answers 5xx is reported, and its result is 
   assert.equal(unavailable.status, 503);
   assert.equal(await (await prodbat.wrap(async (req, extra) => new Response(extra))(request, 'ok')).text(), 'ok');
   await prodbat.onRequestError(new Error('render failed'), { method: 'GET', path: '/dashboard' });
+  // Next.js notFound() and redirect() work by throwing: not reported.
+  const notFound = Object.assign(new Error('NEXT_HTTP_ERROR_FALLBACK;404'), { digest: 'NEXT_HTTP_ERROR_FALLBACK;404' });
+  await assert.rejects(() => prodbat.wrap(async () => { throw notFound; })(request), (e) => e === notFound);
+  await prodbat.onRequestError(Object.assign(new Error('NEXT_REDIRECT'), { digest: 'NEXT_REDIRECT;replace;/login;307;' }), { method: 'GET', path: '/a' });
   await prodbat.flush();
   assert.deepEqual(sent('/api/errors').map((r) => [r.body.route, r.body.kind]), [
     ['POST /api/pay', 'RangeError'], ['POST /api/pay', 'HTTP 503'], ['GET /dashboard', 'Error']]);

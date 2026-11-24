@@ -46,5 +46,13 @@ class ProdbatRailsTest < Minitest::Test
     report = sent.first
     assert_equal %w[KeyError POST\ /api/checkout/:id], report.values_at(:kind, :route)
     assert_match(/test_rails\.rb:\d+ in .*create/, report[:where])
+
+    # An unknown address is a 404 page: the site working normally, not reported.
+    sent.clear
+    Prodbat.stub(:enqueue, ->(_method, path, payload = nil) { sent << payload if path == "/api/errors" }) do
+      status, = ProdbatRailsApp.call(Rack::MockRequest.env_for("/no-such-page"))
+      assert_equal 404, status
+    end
+    assert_empty sent
   end
 end

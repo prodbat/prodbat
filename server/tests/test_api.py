@@ -199,6 +199,26 @@ def test_server_errors_are_grouped_by_where_they_happened(client, db, project, k
     assert errors[2].where == "src/lib/user.ts:42"
 
 
+def test_a_404_or_other_4xx_answer_is_not_a_server_error(client, db, project, key):
+    # Older libraries reported Django's Http404 (saasdir: /product/your-product/) as a crash.
+    not_found = {"kind": "Http404", "message": "No Product matches the given query.", "route": "GET /product/x/",
+                 "where": "listings/views.py:233 in product_detail", "trace": "Traceback ...", "status": 500}
+    for _ in range(6):
+        r = client.post("/api/errors", json=not_found, headers=key)
+        assert r.status_code == 202 and "not a server error" in r.json()["ignored"]
+    client.post("/api/errors", headers=key, json={"kind": "ActiveRecord::RecordNotFound", "route": "GET /orders/9"})
+    client.post("/api/errors", headers=key, json={"kind": "HTTP 404", "status": 404, "route": "GET /nope"})
+    client.post("/api/errors", headers=key, json={"kind": "Error", "message": "NEXT_REDIRECT;replace;/login;307;"})
+    assert client.post("/api/errors", json=not_found).status_code == 401  # the key is still checked first
+    assert db.scalars(select(ServerError)).all() == []
+    evaluate(db)
+    assert db.scalars(select(Incident)).all() == []
+
+    # A real crash on the same page still counts.
+    client.post("/api/errors", headers=key, json={**not_found, "kind": "ValueError", "message": "bad id"})
+    assert [e.kind for e in db.scalars(select(ServerError))] == ["ValueError"]
+
+
 def test_suggestions_are_fixed_text_filled_only_with_the_server_and_domain(client, project, key):
     listing = client.get("/api/suggestions", headers=key).json()
     assert [s["id"] for s in listing["suggestions"]] == ["S-01", "S-02", "S-03", "S-04", "S-05", "S-06", "S-07"]
