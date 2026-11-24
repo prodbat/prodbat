@@ -143,6 +143,8 @@ footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; fl
 {% if step.test and alert_email %}<form method="post" action="/d/{{ token }}/test-alert"><button class="small">Send a test alert</button></form>
 {% elif step.how %}<span class="mono">{{ step.how }}</span>{% endif %}</div></li>
 {% endfor %}
+{% for step in waiting_steps %}<li>{{ ring(22) }}<div><span>{{ step.what }}</span><span class="muted">{{ step.note }}</span></div></li>
+{% endfor %}
 </ul>
 </section>
 {% endif %}

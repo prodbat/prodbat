@@ -54,9 +54,20 @@ def test_once_data_arrives_whats_left_is_a_card_of_lines_for_the_agent(client, d
                     ts=minutes_ago(5)))
     db.commit()
     text = page_text(client, project)
-    assert "Finish setting up" in text and "3 of 8 done" in text
+    assert "Finish setting up" in text and "3 of 9 done" in text
     assert "Payments: forward your Stripe events Run `npx prodbat suggestions S-01` and follow it." in text
+    assert "Job queue Run `npx prodbat suggestions S-06` and follow it." in text
     assert "Nothing has broken since" in text
+
+    # The agent skipped the job queue (there is none) and set up the cron jobs, which have not checked in yet:
+    # neither asks the owner for anything more.
+    project.setup_skipped = [{"id": "S-06", "reason": "No job queue, only cron jobs"}]
+    project.setup_waiting = {"S-02": NOW.isoformat()}
+    db.commit()
+    text = page_text(client, project)
+    assert "4 of 9 done" in text
+    assert "suggestions S-06" not in text and "suggestions S-02" not in text
+    assert "Scheduled jobs Set up. This ticks itself when the first data arrives." in text
 
 
 def test_you_are_live_goes_once_after_the_first_visit_and_nudge_goes_once_after_a_quiet_day(db, project):

@@ -19,6 +19,7 @@ from . import github, push, slack, telegram, webhooks
 from .api import queue_test_alert, script_tag, test_destinations
 from .incidents import agent_prompt, resolve
 from .models import Email, Incident, Mute, Project, PushSubscription, SiteCheck, hash_secret, new_secret
+from .setup import checklist as setup_checklist
 from .summary import gather
 from .texts import can_text, confirm, normalize_number, start_confirming
 from .words import ago, local_zone
@@ -70,6 +71,7 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         checks = await db.scalar(select(func.count()).select_from(SiteCheck)
                                  .where(SiteCheck.project_id == project.id)) or 0
         last_fixed = await db.scalar(select(func.max(Incident.ended_at)).where(Incident.project_id == project.id))
+        items = {item.id: item for item in await setup_checklist(db, project)}
     notice = {"test": f"A test alert is on its way to {places}.",
               "muted": "Done. We will not tell you about that again.",
               "smscode": "We texted you a code. Enter it below to turn texts on.",
@@ -97,11 +99,12 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
               "githubtest": f"A test issue is on its way to {project.github_repo}. It is closed straight away.",
               "githuboff": "GitHub is disconnected. To remove the app from GitHub too, open your GitHub settings, "
                            "then Applications."}.get(sent or "")
-    setup = setup_steps(project, summary, emailed)
+    setup = setup_steps(project, summary, emailed, items)
     return templates.TemplateResponse(request, "page.html", {
         "page": summary, "token": token, "script_tag": script_tag(settings, project), "broken": broken,
         "prompt": prompt, "prompts": prompts, "alert_email": project.alert_email, "notice": notice, "setup": setup,
-        "unfinished": [s for s in setup if not s["done"] and s.get("later")],
+        "unfinished": [s for s in setup if not s["done"] and s.get("later") and not s.get("waiting")],
+        "waiting_steps": [s for s in setup if s.get("waiting")],
         "paused": project.paused_at is not None, "checks": checks,
         "since": f"{project.created_at:%-d %b}", "last_fixed": ago(last_fixed, dt.datetime.now(dt.UTC)) if last_fixed else None, "stalled": stalled(project),
         "texts": can_text(project, settings), "text_where": text_where(settings) if settings.text_prefixes else None, "sms_to": project.sms_to, "sms_pending": project.sms_pending,
@@ -124,24 +127,39 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
     }, headers=PRIVATE)
 
 
-def setup_steps(project: Project, summary, emailed: bool) -> list[dict]:
+def setup_steps(project: Project, summary, emailed: bool, items: dict | None = None) -> list[dict]:
     """The setup checklist. Two steps are done before the owner ever sees
-    it, so it never starts at zero."""
+    it, so it never starts at zero. The later ones follow the same checklist
+    as `npx prodbat setup`: one the agent skipped (no job queue, no payments)
+    shows as skipped with its reason, and one it finished waits for its first
+    data without asking for anything more."""
+    items = items or {}
+
+    def later(sid: str, what: str, done: bool) -> dict:
+        step = {"what": what, "done": done, "later": True, "how": f"Run `npx prodbat suggestions {sid}` and follow it."}
+        item = items.get(sid)
+        if done or item is None:
+            return step
+        if item.state == "done":
+            step["done"] = True
+        elif item.state == "skipped":
+            step |= {"done": True, "skipped": True, "note": f"Skipped: {item.reason}." if item.reason else "Skipped."}
+        elif item.state == "waiting":
+            step |= {"waiting": True, "note": "Set up. This ticks itself when the first data arrives."}
+        return step
+
     return [
         {"what": "Your agent created the project", "done": True},
         {"what": "Alerts have an address to go to", "done": bool(project.alert_email),
          "how": "Run `npx prodbat init --email you@example.com` again with your address."},
         {"what": "Your site sends its first visit", "done": project.first_data_at is not None,
          "how": "Happens after your agent deploys the script tag."},
-        {"what": "Your server reports in", "done": project.first_server_at is not None, "later": True,
-         "how": "Run `npx prodbat suggestions S-03` and follow it."},
+        later("S-03", "Your server reports in", project.first_server_at is not None),
         {"what": "A test alert reaches your inbox", "done": emailed, "later": True, "test": True},
-        {"what": "Payments: forward your Stripe events", "done": summary.payments_connected, "later": True,
-         "how": "Run `npx prodbat suggestions S-01` and follow it."},
-        {"what": "Scheduled jobs and queues", "done": bool(summary.work), "later": True,
-         "how": "Run `npx prodbat suggestions S-06` and follow it."},
-        {"what": "Logs", "done": summary.has_logs, "later": True,
-         "how": "Run `npx prodbat suggestions S-07` and follow it."},
+        later("S-01", "Payments: forward your Stripe events", summary.payments_connected),
+        later("S-02", "Scheduled jobs", False),
+        later("S-06", "Job queue", False),
+        later("S-07", "Logs", summary.has_logs),
     ]
 
 
