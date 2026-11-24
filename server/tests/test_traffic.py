@@ -62,6 +62,16 @@ def test_a_day_of_history_is_enough_to_start():
     assert profile(counts, first + dt.timedelta(hours=4), end) is None  # 20 hours is not
 
 
+def test_a_busy_site_s_first_day_already_shows_its_nights():
+    counts, first, end = daily({**{h: 2 for h in range(24)}, **{h: 100 for h in range(9, 21)}}, 1)
+    rates = profile(counts, first, end)
+    night = end + dt.timedelta(hours=3)
+    assert rates[3] < 4
+    assert level_for(rates, night, night + dt.timedelta(minutes=40)) is None
+    noon = end + dt.timedelta(hours=13)
+    assert level_for(rates, noon, noon + dt.timedelta(minutes=15)) == "broken"
+
+
 def test_with_little_history_an_hour_leans_on_the_site_s_overall_rate():
     counts, first, end = daily({13: 6}, 1)  # six visits a day, all at 13:00
     rates = profile(counts, first, end)

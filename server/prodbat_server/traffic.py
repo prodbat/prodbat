@@ -5,9 +5,11 @@ rolling 4 weeks of those, `profile` gives the visits a site normally gets in
 each of the 168 hours of the week. Hours are UTC, so each site's own nights
 show up wherever its visitors sleep, without asking for a time zone.
 
-A day of history is enough to start. With little history each hour of the
-week leans on broader patterns, first the same hour on every day, then the
-site's overall rate, and the weekly shape takes over as the weeks build up.
+A day of history is enough to start. Each hour of the week leans on broader
+patterns, first the same hour on every day, then the site's overall rate, by
+about PRIOR_VISITS visits' worth. So a busy site's first day already shows
+its nights, and a small site leans on its overall rate for longer, which does
+no harm: at three visits a day a quiet night never adds up to many expected.
 Once an hour has three or more readings its single busiest one is left out,
 so one launch day does not make every later Tuesday look slow.
 
@@ -34,11 +36,8 @@ HOUR = dt.timedelta(hours=1)
 VISIT_GAP = dt.timedelta(minutes=30)
 BASELINE = dt.timedelta(days=28)
 MIN_HISTORY = dt.timedelta(days=1)
-# How strongly a thinly seen hour leans on the broader pattern, counted as
-# readings of it: days of the overall rate for each hour of the day, and weeks
-# of the hour-of-day rate for each hour of the week. First guesses; see replay.
-LEAN_DAY = 1.0
-LEAN_WEEK = 2.0
+# How strongly each hour leans on the broader pattern, in visits. A first guess; see replay.
+PRIOR_VISITS = 1.0
 TRIM_FROM = 3
 # The same bars as detect.py's went-quiet rule, and a silence shorter than this never counts.
 LOOK_CHANCE = 1e-3
@@ -111,11 +110,14 @@ def profile(counts: dict[dt.datetime, int], first: dt.datetime, end: dt.datetime
     day = []
     for h in range(24):
         s, n = trimmed(by_day[h])
-        day.append((s + LEAN_DAY * overall) / (n + LEAN_DAY))
+        lean = PRIOR_VISITS / overall if overall else 0.0  # in days
+        day.append((s + lean * overall) / (n + lean) if n + lean else 0.0)
     week = []
     for s_ in range(168):
         s, n = trimmed(by_week[s_])
-        week.append((s + LEAN_WEEK * day[s_ % 24]) / (n + LEAN_WEEK))
+        parent = day[s_ % 24]
+        lean = PRIOR_VISITS / parent if parent else 0.0  # in weeks
+        week.append((s + lean * parent) / (n + lean) if n + lean else 0.0)
     return week
 
 

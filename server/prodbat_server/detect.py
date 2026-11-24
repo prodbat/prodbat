@@ -16,6 +16,7 @@ from .config import Settings
 from .flows import SAY, flow_for
 from .incidents import report, resolve
 from .models import Incident, Job, Project
+from . import traffic
 from .traffic import VISIT_GAP
 from .words import ago, every, lasted, plural
 
@@ -239,12 +240,52 @@ async def evaluate_project(db: AsyncSession, project: Project, settings: Setting
             resolve(db, project, incident, settings, now, recovery.get(kind))
 
 
+NOT_LEARNED = object()
+
+VISITS_TODO = ("Open your site and check it loads, and that the Prodbat script tag is still in the page; "
+               "or paste the line below into your coding agent.")
+
+
+async def visits_stopped(db: AsyncSession, project: Project, now: dt.datetime):
+    """The 'visitors have stopped' problem from the site's own hourly pattern:
+    the visits it normally gets over exactly the hours of the silence. None if
+    nothing is wrong, NOT_LEARNED with under a day of history."""
+    since = now - traffic.BASELINE
+    rows = (await db.execute(text("select hour, visits from visit_hours where project_id = :p and hour >= :since"),
+                             {"p": project.id, "since": since})).all()
+    first = await db.scalar(text("select min(hour) from visit_hours where project_id = :p"), {"p": project.id})
+    if first is None:
+        return NOT_LEARNED
+    excluded = await traffic.excluded_hours(db, project.id, since, now)
+    rates = traffic.profile({r.hour: r.visits for r in rows}, first, now, excluded)
+    if rates is None:
+        return NOT_LEARNED
+    last = await db.scalar(text("select max(ts) from pageviews where project_id = :p"), {"p": project.id})
+    level = traffic.level_for(rates, last, now)
+    if level is None:
+        return None
+    _, usual = traffic.silence_chance(rates, last, now)
+    return {"level": level, "title": "Visitors have stopped being counted",
+            "what": f"The last visit was counted {ago(last, now)}. At these hours of the week you normally get about "
+                    f"{plural(round(usual), 'visit')} in that time. "
+                    "Either the site is not reaching people, or the Prodbat script was removed in a deploy.",
+            "who": "Possibly every visitor.", "todo": VISITS_TODO,
+            "started_at": last, "data": {"stream": "visitors", "usual_visits": round(usual, 1)}}
+
+
 async def went_quiet(db: AsyncSession, project: Project, stream: str, table: str, now: dt.datetime) -> dict | None:
     """If `stream` has been silent for longer than its usual rate explains,
     the fields for a problem; otherwise None. Assumes events arrive at an even
     rate (Poisson), which overstates the surprise of a quiet night, so the
     chance threshold is strict, and a silence no longer than the longest one
-    in the baseline (a quiet night) never counts."""
+    in the baseline (a quiet night) never counts.
+
+    Visits use the site's own hourly pattern (traffic.py) once there is a day
+    of it; this even-rate rule is for payments, and for visits before that."""
+    if stream == "visitors":
+        learned = await visits_stopped(db, project, now)
+        if learned is not NOT_LEARNED:
+            return learned
     if stream == "visitors":  # one arrival per visit: a page view after the visitor was away VISIT_GAP
         starts = f"""select ts from (select ts, lag(ts) over (partition by visitor order by ts) prev from {table}
                       where project_id = :p and ts >= :since) v
