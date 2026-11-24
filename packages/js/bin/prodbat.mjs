@@ -16,7 +16,8 @@ const HELP = `prodbat: visitors, payments and what is broken, for one site.
   npx prodbat setup                 the setup checklist: what is done, and the steps for the next item. Run it after
                                     verify and keep going until it says setup is complete. --all: the steps for every
                                     item left. Make all the changes, then ship them together.
-  npx prodbat skip <id>             skip a setup item that does not apply to this app; --reason "..." says why
+  npx prodbat skip <id>             skip a setup item that does not apply to this app, or a suggestion the
+                                    user declined (S-04); --reason "..." says why
                                     (npx prodbat unskip <id> undoes it)
   npx prodbat next                  the most important thing to do for the live site, as one task with steps
   npx prodbat tasks                 every open task (npx prodbat task <id> shows one in full)

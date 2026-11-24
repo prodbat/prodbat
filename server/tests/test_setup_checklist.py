@@ -68,10 +68,25 @@ def test_a_server_error_or_a_server_reporting_in_finishes_server_errors(client, 
 def test_only_items_that_may_not_apply_can_be_skipped(client, db, project, key):
     for sid, status, said in [("script", 400, "The script tag cannot be skipped"),
                               ("s-05", 400, "S-05 cannot be skipped. Every app is built on a language and packages"),
-                              ("S-04", 400, "S-04 is not part of setup"),
                               ("S-99", 404, "There is no setup item S-99")]:
         r = client.post(f"/api/setup/{sid}/skip", headers=key)
         assert r.status_code == status and said in r.json()["detail"], sid
+
+
+def test_a_suggestion_outside_setup_can_be_declined_and_is_not_suggested_again(client, db, project, key):
+    # thesaasdir: Render web services have no rewrites, so S-04 would mean a proxy view in Django.
+    offered = lambda: [x["id"] for x in client.get("/api/suggestions", headers=key).json()["suggestions"]]  # noqa: E731
+    assert "S-04" in offered()
+    r = client.post("/api/setup/s-04/skip", headers=key, json={"reason": "No rewrite layer on a Render web service"})
+    assert r.status_code == 200
+    assert r.json()["text"].startswith("Declined S-04, Serve the script from your own domain (No rewrite layer on a "
+                                       "Render web service). Prodbat will not suggest it again.")
+    assert "S-04" not in offered()
+    assert "S-04" not in client.get("/api/setup", headers=key).json()["text"]  # setup is untouched
+    assert "S-04" not in client.get("/api/status", headers=key).json()["text"]
+
+    assert "S-04 is back" in client.delete("/api/setup/S-04/skip", headers=key).json()["text"]
+    assert "S-04" in offered()
 
 
 def test_a_site_with_no_server_skips_server_errors_and_then_may_skip_dependencies(client, db, project, key):

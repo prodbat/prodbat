@@ -290,7 +290,27 @@ def _known(sid: str, doing: str = "skip") -> str:
     raise HTTPException(404, f"There is no setup item {sid}. Run `npx prodbat setup` for the list.")
 
 
+def _suggestion_only(sid: str) -> str | None:
+    """A suggestion outside setup (S-04, serving the script from the app's own domain), or None."""
+    sid = sid.strip().upper()
+    return sid if sid in BY_ID and sid not in ORDER else None
+
+
+async def decline(db: AsyncSession, project: Project, sid: str, reason: str | None) -> dict:
+    """The user does not want a suggestion that is not part of setup: it is not offered again,
+    in status, in next or as a task. Kept with the setup skips, which suggestions already leave out."""
+    reason = clean_reason(reason)
+    rest = [e for e in project.setup_skipped or [] if _entry_id(e) != sid]
+    project.setup_skipped = [*rest, {"id": sid, "reason": reason} if reason else sid]
+    await db.commit()
+    return {"id": sid, "skipped": True, "reason": reason,
+            "text": f"Declined {sid}, {BY_ID[sid]['title']}{f' ({reason})' if reason else ''}. Prodbat will not "
+                    f"suggest it again. If that changes, run `npx prodbat unskip {sid}`.\n"}
+
+
 async def skip(db: AsyncSession, project: Project, settings: Settings, sid: str, reason: str | None = None) -> dict:
+    if suggestion := _suggestion_only(sid):
+        return await decline(db, project, suggestion, reason)
     sid = _known(sid)
     skips = skipped(project)
     if sid in REQUIRED and not ("S-03" in skips and sid not in NO_SERVER_REQUIRED):
@@ -313,6 +333,11 @@ async def skip(db: AsyncSession, project: Project, settings: Settings, sid: str,
 
 
 async def unskip(db: AsyncSession, project: Project, settings: Settings, sid: str) -> dict:
+    if suggestion := _suggestion_only(sid):
+        project.setup_skipped = [e for e in project.setup_skipped or [] if _entry_id(e) != suggestion]
+        await db.commit()
+        return {"id": suggestion, "skipped": False,
+                "text": f"{suggestion} is back: Prodbat will suggest it again while it applies.\n"}
     sid = _known(sid)
     # S-05 could only be skipped because S-03 was, so they come back together.
     back = {sid, "S-05"} if sid == "S-03" else {sid}

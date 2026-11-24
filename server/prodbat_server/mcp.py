@@ -56,9 +56,10 @@ TOOLS = [
          "required": ["ids"]}},
     {"name": "prodbat_skip_setup",
      "description": "Skip a setup item that truly does not apply to this app, such as watching scheduled jobs in an "
-                    "app that has none. Ask the user if you are not sure.",
+                    "app that has none, or record that the user declined a suggestion outside setup (such as S-04) "
+                    "so it is not suggested again. Ask the user if you are not sure.",
      "inputSchema": {"type": "object", "properties": {
-         "id": {"type": "string", "description": "A setup item id, such as S-02"},
+         "id": {"type": "string", "description": "A setup item or suggestion id, such as S-02 or S-04"},
          "reason": {"type": "string", "description": "Why it does not apply, in a few words; the checklist shows it"}},
          "required": ["id"]}},
     {"name": "prodbat_next_task",
