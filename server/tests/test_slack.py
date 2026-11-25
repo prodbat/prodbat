@@ -74,8 +74,8 @@ def deliver(db, slack_api):
 
 
 def test_connecting_a_channel(slacking, client, db, project, slack_api):
-    assert "Add to Slack" not in page_text(client, project), "not offered when the server has no Slack app"
-    assert "Add to Slack" in page_text(slacking, project)
+    assert "Add to Slack" not in page_text(client, project, "settings"), "not offered when the server has no Slack app"
+    assert "Add to Slack" in page_text(slacking, project, "settings")
 
     went = slacking.post(f"/d/{project.page_token}/slack")
     assert went.status_code == 303 and went.headers["location"].startswith("https://slack.com/oauth/v2/authorize?")
@@ -85,19 +85,19 @@ def test_connecting_a_channel(slacking, client, db, project, slack_api):
 
     assert slacking.get("/slack/callback", params={"state": query["state"] + "x", "code": "c"}).status_code == 400
     back = slacking.get("/slack/callback", params={"state": query["state"], "code": "c"})
-    assert back.headers["location"] == f"/d/{project.page_token}?sent=slackon#slack"
+    assert back.headers["location"] == f"/d/{project.page_token}/settings?sent=slackon#slack"
     db.refresh(project)
     assert (project.slack_token, project.slack_channel_id, project.slack_team) == ("xoxb-1", "C1", "Acme")
     assert project.slack_state is None, "a state works once"
     assert slacking.get("/slack/callback", params={"state": query["state"], "code": "c"}).status_code == 400
     assert "Prodbat will post here" in posts(db)[0].text
 
-    text = page_text(slacking, project)
+    text = page_text(slacking, project, "settings")
     assert "Alerts also go to #alerts in Acme" in text
     assert slacking.post(f"/d/{project.page_token}/test-alert").status_code == 303
     assert posts(db)[-1].text.startswith("Test: this is what a Prodbat alert")
     assert "on its way to you@example.com and #alerts in Slack" in \
-        page_text(slacking, project) + slacking.get(f"/d/{project.page_token}?sent=test").text
+        page_text(slacking, project, "settings") + slacking.get(f"/d/{project.page_token}/settings?sent=test").text
 
     slacking.post(f"/d/{project.page_token}/slack/remove")
     db.refresh(project)
@@ -169,7 +169,7 @@ def test_a_removed_app_stops_and_says_so(db, project, slack_api, slacking):
     db.refresh(project)
     assert "removed from your Slack" in project.slack_error
     assert posts(db)[0].attempts == 5, "not retried"
-    assert "Connect Slack again" in page_text(slacking, project)
+    assert "Connect Slack again" in page_text(slacking, project, "settings")
     run(lambda sessions: _report(sessions, "y"), db)
     assert len(posts(db)) == 1, "nothing more is queued until it is connected again"
 

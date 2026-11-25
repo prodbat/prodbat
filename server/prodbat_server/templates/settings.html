@@ -1,0 +1,246 @@
+{% extends "_page_base.html" %}
+{% block title %}Alerts and settings:{% endblock %}
+{% block style %}
+.settings { max-width: 780px; display: flex; flex-direction: column; gap: 18px; }
+.when { padding: 0; overflow: hidden; }
+.when h2 { padding: 20px 24px 4px; }
+.when div { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 14px 24px; border-top: 1px solid var(--soft); align-items: baseline; }
+.when b { flex: 1 1 200px; }
+.when span { flex: 999 1 300px; color: var(--body); font-size: 15px; }
+.when .bad { color: #8A2A06; } .when .look { color: var(--look-mark); }
+.developers { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.developers > summary { cursor: pointer; padding: 20px 24px; font-weight: 700; font-size: 17px; }
+.developers > div { display: flex; flex-direction: column; gap: 18px; padding: 0 16px 16px; }
+.plain { display: flex; flex-direction: column; gap: 12px; }
+#github label { display: block; }
+#github input:not([type]) { width: min(520px, 100%); margin-top: 6px; }
+{% endblock %}
+{% block main %}
+<div>
+<h1 class="display">How we reach you</h1>
+<p class="lede">Prodbat only interrupts you when visitors are affected. Everything else waits for the Monday email.</p>
+</div>
+
+<div class="settings">
+<section class="card when" aria-labelledby="when">
+<h2 id="when">What happens when</h2>
+{% set extra = [('a text' if texts else ''), ('a phone notification' if push else ''), ('a Slack message' if slack else '')] | select | list %}
+<div><b class="bad">Your site breaks</b><span>An email straight away{% if extra %}, and {{ extra[:-1] | join(', ') }}{% if extra | length > 1 %} or {% endif %}{{ extra[-1] }} if you turn {{ 'it' if extra | length == 1 else 'them' }} on below{% endif %}.</span></div>
+<div><b class="look">Something needs a look</b><span>One email. No texts.</span></div>
+<div><b>Every Monday</b><span>A short email: visitors, sales and anything worth doing someday.</span></div>
+</section>
+
+<section class="card list" id="test-alert">
+<h2>Email</h2>
+{% if alert_email %}<p>Alerts go to {{ alert_email }}.</p>
+{% else %}<p><strong>No email address is set, so alerts have nowhere to go.</strong></p>{% endif %}
+<p class="muted">To change it, tell your coding agent: <span class="mono">Run `npx prodbat init --email you@example.com` with the new address.</span></p>
+{% if can_test %}<div class="actions"><form method="post" action="/d/{{ token }}/test-alert"><button>Send me a test alert</button></form>{% if github_issues_on %}<span class="muted">GitHub gets a test issue, closed straight away.</span>{% endif %}</div>{% endif %}
+</section>
+
+{% if texts %}
+<section class="card list" id="texts">
+<h2>Text messages</h2>
+{% if sms_to %}
+<p>Texts go to <strong>{{ sms_to }}</strong> when customers are affected ("Broken:"), and when it's working again. Nothing else is texted.</p>
+<form method="post" action="/d/{{ token }}/sms/remove"><button class="quiet">Stop texting me</button></form>
+{% elif sms_pending %}
+<p>We texted a code to {{ sms_pending }}.</p>
+<form method="post" action="/d/{{ token }}/sms/confirm" class="actions">
+<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="6-digit code" aria-label="Code">
+<button class="primary">Turn texts on</button>
+</form>
+{% else %}
+<p class="muted">Get a text when customers are affected: checkout or sign-in failing, or the site down. Only "Broken:" alerts are texted.{% if text_where %} Texts can only go to {{ text_where }} for now.{% endif %}</p>
+<form method="post" action="/d/{{ token }}/sms" class="actions">
+<input name="number" type="tel" autocomplete="tel" required placeholder="+1 555 123 4567" aria-label="Phone number with country code">
+<button>Text me a code</button>
+</form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if push %}
+<section class="card list" id="push">
+<h2>Phone notifications</h2>
+{% if push_error %}<p><strong>{{ push_error }}</strong></p>{% endif %}
+<p class="muted">Get a notification on your phone or computer when something breaks or needs a look, and when it's working again. It works in Chrome, Edge and Firefox, and on an iPhone or iPad once this page is on your Home Screen.</p>
+{% if devices %}
+<div class="rows">
+{% for device in devices %}<div class="row"><span>{{ device.label }} <span class="muted">added {{ device.created_at.day }} {{ device.created_at.strftime('%b') }}</span></span>
+<form method="post" action="/d/{{ token }}/push/{{ device.id }}/remove"><button class="quiet">Remove</button></form></div>
+{% endfor %}</div>
+{% endif %}
+<p class="muted" id="push-help" role="status" hidden></p>
+<div class="actions"><button type="button" id="push-on" data-key="{{ vapid_key }}">Notify me on this device</button></div>
+</section>
+{% endif %}
+
+{% if slack %}
+<section class="card list" id="slack">
+<h2>Slack</h2>
+{% if slack_error %}
+<p><strong>{{ slack_error }}</strong> Alerts still go by email.</p>
+<form method="post" action="/d/{{ token }}/slack" class="actions"><button class="primary">Connect Slack again</button></form>
+{% elif slack_connected %}
+<p>Alerts also go to <strong>{{ slack_channel }}</strong>{% if slack_team %} in {{ slack_team }}{% endif %}. Each problem is one message, and "Working again" replies in its thread.</p>
+<form method="post" action="/d/{{ token }}/slack/remove"><button class="quiet">Disconnect Slack</button></form>
+{% else %}
+<p class="muted">Post alerts to a Slack channel as well as by email. You pick the channel; we only post alerts there.</p>
+<form method="post" action="/d/{{ token }}/slack" class="actions"><button>Add to Slack</button></form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if telegram or github or webhook %}
+<details class="developers"{% if telegram_links or telegram_error or telegram_connected or github_choices or gh.github_error or gh.github_repo or gh.github_note or webhook_url %} open{% endif %}>
+<summary>For developers: {{ [('Telegram' if telegram else ''), ('GitHub issues' if github else ''), ('webhooks' if webhook else '')] | select | join(', ') }}</summary>
+<div>
+{% if telegram %}
+<section class="card list" id="telegram">
+<h2>Telegram</h2>
+{% if telegram_links %}
+<p>Open Telegram and press Start. For a group instead, use the second link and pick the group. The links work for an hour.</p>
+<div class="actions" data-telegram-waiting>
+<a class="button primary" href="{{ telegram_links.chat }}" target="_blank" rel="noopener">Open Telegram</a>
+<a class="button" href="{{ telegram_links.group }}" target="_blank" rel="noopener">Add to a group</a>
+</div>
+{% elif telegram_error %}
+<p><strong>{{ telegram_error }}</strong> Alerts still go by email.</p>
+<form method="post" action="/d/{{ token }}/telegram" class="actions"><button class="primary">Connect Telegram again</button></form>
+{% elif telegram_connected %}
+<p>Alerts also go to <strong>{{ telegram_chat }}</strong> in Telegram. Each problem is one message, and "Working again" replies to it.</p>
+<form method="post" action="/d/{{ token }}/telegram/remove"><button class="quiet">Disconnect Telegram</button></form>
+{% else %}
+<p class="muted">Get alerts in a Telegram chat or group as well as by email. Only alerts are sent there.</p>
+<form method="post" action="/d/{{ token }}/telegram" class="actions"><button>Connect Telegram</button></form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if github %}
+<section class="card list" id="github">
+<h2>GitHub issues</h2>
+{% if github_choices %}
+<p>Pick the repository where Prodbat opens issues.{% if github_choices.login %} These are the ones your GitHub account, @{{ github_choices.login }}, can reach with the app:{% endif %}</p>
+{% set reachable = github_choices.installations | map(attribute='repos') | map('length') | sum %}
+{% if reachable %}
+<form method="post" action="/d/{{ token }}/github/pick" class="actions">
+<select name="choice" aria-label="Repository">{% for i in github_choices.installations %}{% if i.repos %}<optgroup label="{{ i.account }}">{% for r in i.repos %}<option value="{{ i.id }}:{{ r.name }}">{{ r.name }}{% if not r.private %} (public){% endif %}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}</select>
+<button class="primary">Open issues here</button>
+</form>
+<p class="muted">Issues include error messages and log lines, so a private repository is best. In a public one, anyone can read them.</p>
+{% else %}<p class="muted">The app is installed, but your GitHub account can't reach any repository through it yet. Give it this site's repository on GitHub.</p>{% endif %}
+<div class="actions">
+<form method="post" action="/d/{{ token }}/github/install"><button class="quiet">Not listed? Add a repository on GitHub</button></form>
+</div>
+{% elif gh.github_error %}
+<p><strong>{{ gh.github_error }}</strong> Alerts still go by email.</p>
+<form method="post" action="/d/{{ token }}/github" class="actions"><button class="primary">Connect GitHub again</button></form>
+{% elif gh.github_installation_id and gh.github_repo %}
+{% if gh.github_login %}<p class="muted">Connected by @{{ gh.github_login }}.</p>{% endif %}
+<p>Each Broken problem{% if gh.github_look %}, and each Needs a look,{% endif %} opens an issue in <strong>{{ gh.github_repo }}</strong> labelled <code>prodbat</code>, with the task and the evidence for a coding agent. Later news is a comment, and "Working again" closes it. What picks the issue up is up to you: an agent you assign or mention, or a workflow that watches the label.</p>
+{% if gh.github_note %}<p><strong>{{ gh.github_note }}</strong></p>{% endif %}
+<form method="post" action="/d/{{ token }}/github/settings" class="plain">
+<label><input type="checkbox" name="look" value="1"{% if gh.github_look %} checked{% endif %} style="min-width: 0; min-height: 0"> Also open issues for Needs a look</label>
+<label>A line to end each issue with <span class="muted">(optional, such as <code>@claude please fix this</code>)</span><br>
+<input name="mention" maxlength="300" value="{{ gh.github_mention or '' }}" placeholder="@claude please investigate and open a PR"></label>
+<label>Assign to <span class="muted">(optional, GitHub logins separated by commas)</span><br>
+<input name="assignees" maxlength="400" value="{{ gh.github_assignees or '' }}" placeholder="ann, octocat"></label>
+<p class="muted">GitHub doesn't let an app assign Copilot's coding agent. To hand issues to Copilot, use the small workflow in the guide for cloud agents, which assigns it with your own token.</p>
+<div class="actions"><button>Save</button></div>
+</form>
+<div class="actions">
+<form method="post" action="/d/{{ token }}/github/test"><button>Open a test issue (it's closed straight away)</button></form>
+<form method="post" action="/d/{{ token }}/github"><button class="quiet">Use another repository</button></form>
+<form method="post" action="/d/{{ token }}/github/remove"><button class="quiet">Disconnect GitHub</button></form>
+</div>
+{% else %}
+{% if gh.github_note %}<p><strong>{{ gh.github_note }}</strong></p>{% endif %}
+<p class="muted">Open a GitHub issue for each Broken problem, with the task and the evidence, so a coding agent that works from issues can pick it up. GitHub asks you once to authorize Prodbat, then you choose one of your repositories; Prodbat only reads and writes issues there.</p>
+<form method="post" action="/d/{{ token }}/github" class="actions"><button>Connect GitHub</button></form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if webhook %}
+<section class="card list" id="webhook">
+<h2>Webhook</h2>
+{% if webhook_url %}
+{% if webhook_error %}<p><strong>{{ webhook_error }}</strong> Send a test to turn it on again.</p>{% endif %}
+<p>Each problem, change and fix check is sent as signed JSON to <span class="mono">{{ webhook_url }}</span>.</p>
+{% if deliveries %}
+<div class="rows">
+{% for d in deliveries %}<div class="row"><span class="mono">{{ d.event }}</span><span class="muted">{% if d.sent_at %}delivered{% elif d.gave_up_at %}gave up{% elif d.attempts %}retrying{% else %}waiting{% endif %}{% if d.last_status %} · {{ d.last_status }}{% elif d.last_error %} · {{ d.last_error }}{% endif %}{% if d.last_attempt_at %} · {{ d.last_attempt_at.strftime('%-d %b %H:%M') }} UTC{% endif %}</span></div>
+{% endfor %}</div>
+{% endif %}
+<div class="actions">
+<form method="post" action="/d/{{ token }}/webhook/test"><button>Send a test</button></form>
+<form method="post" action="/d/{{ token }}/webhook/secret"><button class="quiet">Show the signing secret</button></form>
+<form method="post" action="/d/{{ token }}/webhook/secret" onsubmit="return confirm('Replace the signing secret? The old one stops working at once.')"><input type="hidden" name="rotate" value="1"><button class="quiet">New signing secret</button></form>
+<form method="post" action="/d/{{ token }}/webhook/remove"><button class="quiet">Remove</button></form>
+</div>
+{% else %}
+<p class="muted">Send each problem as signed JSON to an address you run: a cloud coding agent, a small relay, n8n or Zapier. It has to start with https://.</p>
+<form method="post" action="/d/{{ token }}/webhook" class="actions">
+<input name="url" type="url" required maxlength="500" placeholder="https://example.com/prodbat-hook" aria-label="Webhook address">
+<button>Add webhook</button>
+</form>
+{% endif %}
+</section>
+{% endif %}
+</div>
+</details>
+{% endif %}
+
+<section class="card list">
+<h2>The secret key</h2>
+<p class="muted">Your server and your coding agent use it to send Prodbat data. Replace it if it may have leaked; your host then needs the new one.</p>
+<form method="post" action="/d/{{ token }}/key" onsubmit="return confirm('Replace the secret key? The old one stops working at once, and your host will need the new one.')"><button>New secret key</button></form>
+</section>
+</div>
+{% endblock %}
+{% block script %}{% if push %}// Notifications on this device: ask the browser, then hand its subscription to Prodbat.
+(function () {
+  var on = document.getElementById('push-on'), help = document.getElementById('push-help');
+  function say(text) { help.textContent = text; help.hidden = false; }
+  var denied = 'Notifications are blocked for this page. Allow them in your browser\'s settings for this site, then press the button again.';
+  var apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var installed = navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    on.hidden = true;
+    say(apple && !installed
+      ? 'On an iPhone or iPad, tap Share, then Add to Home Screen. Open Prodbat from your Home Screen, then tap Notify me on this device there.'
+      : 'This browser can\'t show notifications from websites. Chrome, Edge and Firefox can.');
+    return;
+  }
+  if (Notification.permission === 'denied') say(denied);
+  function key(text) {
+    var raw = atob((text + '===='.slice(text.length % 4 || 4)).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, function (c) { return c.charCodeAt(0); });
+  }
+  on.addEventListener('click', function () {
+    on.disabled = true;
+    Notification.requestPermission().then(function (answer) {
+      if (answer !== 'granted') throw new Error(answer === 'denied' ? denied : 'Press the button again and choose Allow.');
+      return navigator.serviceWorker.register('/d/sw.js', { scope: '/d/{{ token }}' });
+    }).then(function () { return navigator.serviceWorker.ready; }).then(function (reg) {
+      return reg.pushManager.getSubscription().then(function (sub) {
+        return sub || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(on.dataset.key) });
+      });
+    }).then(function (sub) {
+      return fetch('/d/{{ token }}/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sub) });
+    }).then(function (r) {
+      if (r.ok) { location.href = '/d/{{ token }}/settings?sent=pushon#push'; return; }
+      return r.json().then(function (j) { throw new Error(j.detail || 'That didn\'t work. Try again.'); });
+    }).catch(function (e) {
+      on.disabled = false;
+      say(e && e.message && e.message.indexOf(' ') > 0 ? e.message : 'That didn\'t work. Try again.');
+    });
+  });
+})();
+{% endif %}// Back from Telegram: look again, so the page says it is connected.
+if (document.querySelector('[data-telegram-waiting]')) document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') location.reload();
+});
+{% endblock %}

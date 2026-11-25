@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>{% block title %}{% endblock %} {{ page.domain }}</title>
+<link rel="manifest" href="/d/{{ token }}/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<meta name="theme-color" content="#F3F4EF">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,700..900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #F3F4EF; --surface: #FFFFFF; --ink: #121416; --body: #3A4045; --muted: #5A6167; --line: #D5D8D0; --soft: #E8EAE3;
+  --ok: #8FDDAA; --ok-ink: #0B2416; --ok-mark: #1B7245; --look: #F2B33D; --look-ink: #2A1B00; --look-mark: #8F5B00;
+  --bad: #B93A0B; --bad-ink: #FFF6F1; --panel: #14171A; --panel-fg: #EEF0EA; --panel-muted: #A0A79E; --panel-line: #2A2F33; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 Inter, system-ui, sans-serif; }
+a { color: var(--ink); }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+main.wrap { display: flex; flex-direction: column; gap: 36px; padding-top: 36px; padding-bottom: 64px; }
+.muted { color: var(--muted); font-size: 15px; }
+.display { margin: 0; font: 900 clamp(34px, 4.6vw, 56px)/1.02 Archivo, 'Arial Narrow', Inter, sans-serif; font-stretch: 110%; letter-spacing: -0.02em; }
+.lede { margin: 12px 0 0; font-size: 17px; color: var(--body); max-width: 60ch; }
+h2 { margin: 0 0 12px; font-size: 19px; font-weight: 700; }
+h3 { margin: 0; font-size: 21px; line-height: 1.3; font-weight: 700; }
+p { margin: 0; }
+.notice { background: #DDF3E5; color: #0E5A33; border-radius: 10px; padding: 12px 16px; font-weight: 500; }
+.paused { background: #FFF4DB; color: #5A3D00; border-radius: 10px; padding: 12px 16px; font-weight: 500; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.list { padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; }
+.list h2 { margin: 0; }
+.list-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+form { margin: 0; }
+button, a.button { font: inherit; font-size: 15px; font-weight: 600; min-height: 46px; padding: 0 18px; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--surface); color: var(--ink); border: 2px solid var(--ink); box-shadow: 0 3px 0 var(--ink); text-decoration: none; }
+button.primary, a.button.primary { background: var(--panel); color: #F3F4EF; border-color: #000; box-shadow: 0 3px 0 #000; }
+button:active, a.button:active { transform: translateY(2px); box-shadow: 0 1px 0 #000; }
+button.quiet { border: 0; box-shadow: none; background: transparent; padding: 0 6px; min-height: 44px; font-size: 14px; font-weight: 500; color: var(--body); text-decoration: underline; }
+button.small { min-height: 40px; padding: 0 14px; font-size: 14px; align-self: flex-start; }
+button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--ok-mark); outline-offset: 2px; }
+pre { margin: 0; background: var(--panel); color: #E9ECE6; border-radius: 10px; padding: 16px 18px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 'JetBrains Mono', ui-monospace, monospace; }
+code, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.92em; }
+.rows { display: flex; flex-direction: column; }
+.row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--soft); }
+.row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.row b { font-weight: 600; white-space: nowrap; }
+.empty { color: var(--muted); font-size: 15px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.steps li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--soft); }
+.steps li svg { flex: none; margin-top: 1px; }
+.steps li > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.steps .done { color: var(--muted); }
+input, select { font: inherit; min-height: 46px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--muted); background: #FFF; color: var(--ink); min-width: min(260px, 100%); }
+footer { border-top: 1px solid var(--line); padding-top: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
+{% include "_nav_style.html" %}
+{% block style %}{% endblock %}
+@media (max-width: 640px) { .wrap { padding: 0 14px; } main.wrap { padding-top: 24px; } }
+</style>
+</head>
+<body>
+{% set status = page.status %}
+<div class="shell">
+{% with domain=page.domain %}{% include "_nav.html" %}{% endwith %}
+<div class="content">
+<main class="wrap">
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if paused %}<p class="paused" role="status">Monitoring is paused, so nothing on {{ page.domain }} is being checked, stored or emailed.</p>{% endif %}
+{% block main %}{% endblock %}
+</main>
+</div>
+</div>
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-copy]');
+  if (b) {
+    navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent).then(function () {
+      var was = b.textContent; b.textContent = 'Copied'; setTimeout(function () { b.textContent = was; }, 1500);
+    });
+  }
+});
+// A link to a section folded away (#telegram, #github, #webhook) opens it.
+(function () {
+  var target = location.hash && document.getElementById(location.hash.slice(1));
+  var fold = target && target.closest('details');
+  if (fold) { fold.open = true; target.scrollIntoView(); }
+})();
+{% if needs_timezone %}// Tell Prodbat this browser's time zone once, so emails use local times.
+try {
+  var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (tz) fetch('/d/{{ token }}/timezone', { method: 'POST', body: new URLSearchParams({ tz: tz }) });
+} catch (_) {}
+{% endif %}{% block script %}{% endblock %}
+</script>
+</body>
+</html>

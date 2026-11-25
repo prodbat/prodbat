@@ -216,20 +216,20 @@ def nothing_holds_the_user_token(db, *responses):
 
 
 def test_github_is_offered_only_with_all_five_settings(client, db, project):
-    assert "Connect GitHub" not in page_text(client, project), "not offered when the server has no app"
+    assert "Connect GitHub" not in page_text(client, project, "settings"), "not offered when the server has no app"
     for missing in ("github_app_id", "github_app_slug", "github_app_private_key", "github_app_client_id",
                     "github_app_client_secret"):
         settings = ISSUING.model_copy(update={missing: None})
         assert not settings.github_configured
         app = create_app(settings, http=httpx.AsyncClient(transport=httpx.MockTransport(GitHub())))
         with TestClient(app, headers={"user-agent": BROWSER}, follow_redirects=False) as partial:
-            assert "Connect GitHub" not in page_text(partial, project), missing
+            assert "Connect GitHub" not in page_text(partial, project, "settings"), missing
             assert partial.post(f"/d/{project.page_token}/github").status_code == 403
             assert partial.get("/github/callback").status_code == 404
 
 
 def test_connecting_authorizes_the_user_and_lists_only_what_they_can_reach(issuing, db, project, gh):
-    assert "Connect GitHub" in page_text(issuing, project)
+    assert "Connect GitHub" in page_text(issuing, project, "settings")
     url, query = start(issuing, project)
     assert (url.netloc, url.path) == ("github.com", "/login/oauth/authorize")
     assert query["client_id"] == ["Iv1.client"] and query["redirect_uri"] == ["https://pb.example/github/callback"]
@@ -242,7 +242,7 @@ def test_connecting_authorizes_the_user_and_lists_only_what_they_can_reach(issui
         "the state must come back to the browser that left"
     put(issuing, "pb_github", state)
     back = back_from_github(issuing, code="good-code", state=state)
-    assert back.headers["location"] == f"/d/{project.page_token}?sent=githubpick#github"
+    assert back.headers["location"] == f"/d/{project.page_token}/settings?sent=githubpick#github"
     exchange = next(r for r in gh.seen if r.url.path == "/login/oauth/access_token")
     assert exchange.headers["accept"] == "application/json"
     assert urllib.parse.parse_qs(exchange.content.decode())["client_id"] == ["Iv1.client"]
@@ -256,7 +256,7 @@ def test_connecting_authorizes_the_user_and_lists_only_what_they_can_reach(issui
     put(issuing, "pb_github", state)
     assert back_from_github(issuing, code="good-code", state=state).status_code == 400, "a state works once"
 
-    page = page_text(issuing, project)
+    page = page_text(issuing, project, "settings")
     assert "Pick the repository" in page and "@ann" in page and "ann/blog (public)" in page
     assert "ann/elsewhere" not in page
     pick = f"/d/{project.page_token}/github/pick"
@@ -268,13 +268,13 @@ def test_connecting_authorizes_the_user_and_lists_only_what_they_can_reach(issui
     assert issuing.post(pick, data={"choice": f"77:{REPO}"}).status_code == 400, "only the browser that went to GitHub"
     put(issuing, "pb_github_pick", nonce)
     picked = issuing.post(pick, data={"choice": f"77:{REPO}"})
-    assert picked.headers["location"] == f"/d/{project.page_token}?sent=githubon#github"
+    assert picked.headers["location"] == f"/d/{project.page_token}/settings?sent=githubon#github"
     db.refresh(project)
     assert (project.github_installation_id, project.github_repo, project.github_account, project.github_login) == \
         (77, REPO, "ann", "ann")
     assert project.github_pending is None
     assert issuing.post(pick, data={"choice": f"77:{REPO}"}).status_code == 400, "the list works once"
-    page = page_text(issuing, project)
+    page = page_text(issuing, project, "settings")
     assert f"opens an issue in {REPO}" in page and "Connected by @ann" in page
     nothing_holds_the_user_token(db, picked)
 
@@ -293,7 +293,7 @@ def test_a_spoofed_installation_id_is_refused(issuing, db, project, gh):
     db.refresh(project)
     assert project.github_installation_id is None and project.github_pending is None
     assert project.github_note == github.NOT_YOURS
-    assert "didn't list that installation for your GitHub account" in page_text(issuing, project)
+    assert "didn't list that installation for your GitHub account" in page_text(issuing, project, "settings")
 
     # Another app's installation that the user can reach is no better.
     gh.codes["again"] = USER_TOKEN
@@ -343,7 +343,7 @@ def test_the_pick_list_runs_out(issuing, db, project, gh):
     project.github_pending = project.github_pending | {
         "at": (dt.datetime.now(dt.UTC) - github.PICK_LIFE - dt.timedelta(minutes=1)).isoformat()}
     db.commit()
-    assert "Pick the repository" not in page_text(issuing, project)
+    assert "Pick the repository" not in page_text(issuing, project, "settings")
     assert issuing.post(f"/d/{project.page_token}/github/pick", data={"choice": f"77:{REPO}"}).status_code == 400
 
 
@@ -366,7 +366,7 @@ def test_with_nothing_installed_it_installs_and_the_way_back_completes(issuing, 
     gh.codes["after-install"] = USER_TOKEN
     put(issuing, "pb_github", back.cookies["pb_github"])
     done =back_from_github(issuing, code="after-install", installation_id="77", setup_action="install")
-    assert done.headers["location"] == f"/d/{project.page_token}?sent=githubon#github"
+    assert done.headers["location"] == f"/d/{project.page_token}/settings?sent=githubon#github"
     db.refresh(project)
     assert (project.github_installation_id, project.github_repo, project.github_login) == (77, REPO, "ann"), \
         "the only repository is picked"
@@ -379,7 +379,7 @@ def test_an_installation_already_there_can_be_used_for_another_site(issuing, db,
     gh.users[USER_TOKEN]["repos"][78] = [{"full_name": "ann-co/api", "private": True}]
     _, query = start(issuing, project)
     back_from_github(issuing, code="good-code", state=query["state"][0])
-    page = page_text(issuing, project)
+    page = page_text(issuing, project, "settings")
     assert "ann-co/api" in page and REPO in page
     issuing.post(f"/d/{project.page_token}/github/pick", data={"choice": "78:ann-co/api"})
     db.refresh(project)
@@ -512,7 +512,7 @@ def test_uninstalled_or_out_of_reach_disconnects_with_a_reason(issuing, db, proj
     assert deliver(db, gh) == 0
     db.refresh(project)
     assert project.github_error == github.UNINSTALLED and posts(db)[0].attempts == github.MAX_ATTEMPTS
-    page = page_text(issuing, project)
+    page = page_text(issuing, project, "settings")
     assert "uninstalled" in page and "Connect GitHub again" in page
     run(lambda sessions: _report(sessions, key="x"), db)
     assert len(posts(db)) == 1, "nothing more is queued until it is connected again"
@@ -534,7 +534,7 @@ def test_a_refused_assignee_is_dropped_and_noted(issuing, db, project, gh):
     assert sent[0]["assignees"] == ["nobody-here"] and "assignees" not in sent[1]
     db.refresh(project)
     assert "wouldn't assign nobody-here" in project.github_note
-    assert "wouldn't assign nobody-here" in page_text(issuing, project)
+    assert "wouldn't assign nobody-here" in page_text(issuing, project, "settings")
 
 
 def test_rate_limits_wait_without_using_up_attempts(db, project, gh):
@@ -561,10 +561,10 @@ def test_rate_limits_wait_without_using_up_attempts(db, project, gh):
 
 def test_the_test_issue_is_labelled_and_closed_straight_away(issuing, db, project, gh):
     connect(db, project, github_mention="@claude fix it", github_assignees="ann")
-    assert "GitHub gets a test issue, closed straight away" in page_text(issuing, project)
+    assert "GitHub gets a test issue, closed straight away" in page_text(issuing, project, "settings")
     issuing.post(f"/d/{project.page_token}/test-alert")
     assert "ann/shop on GitHub (a test issue, closed straight away)" in \
-        issuing.get(f"/d/{project.page_token}?sent=test").text
+        issuing.get(f"/d/{project.page_token}/settings?sent=test").text
     deliver(db, gh)
     issue = gh.calls("POST", f"/repos/{REPO}/issues")[0]
     assert issue["title"].startswith("Test from Prodbat") and "closed straight away" in issue["title"]
@@ -584,7 +584,7 @@ def test_settings_and_plan_switch(issuing, db, project):
 
     project.github_enabled = False
     db.commit()
-    assert "GitHub issues" not in page_text(issuing, project)
+    assert "GitHub issues" not in page_text(issuing, project, "settings")
     assert issuing.post(f"/d/{project.page_token}/github").status_code == 403
     run(_report, db)
     assert posts(db) == []

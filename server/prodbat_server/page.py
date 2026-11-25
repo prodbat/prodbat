@@ -1,4 +1,4 @@
-"""The one page: a status sentence, five numbers and four lists.
+"""The project's pages: what there is to do, the site this week, and where alerts go.
 
 There is no sign-in in the open-source server; the link is the secret.
 """
@@ -54,15 +54,20 @@ async def service_worker() -> FileResponse:
                         headers={"Cache-Control": "no-cache"})
 
 
-@router.get("/d/{token}", response_class=HTMLResponse)
-async def page(request: Request, token: str, sent: str | None = None) -> HTMLResponse:
+# Kinds of problem that are about the site misbehaving, for the seven days strip.
+SITE_TROUBLE_SKIPS = ("advisory", "cert", "domain")
+
+
+async def page_context(request: Request, token: str, sent: str | None) -> dict:
+    """What the to-do page, the week page and the settings page all draw on."""
     settings = request.app.state.settings
+    now = dt.datetime.now(dt.UTC)
     async with request.app.state.sessions() as db:
         project = await project_by_token(request, db, token)
         devices = await push.devices(db, project, settings)
         deliveries = await webhooks.recent(db, project) if project.webhook_url else []
         places = await test_destinations(db, project, settings) if sent == "test" else ""
-        summary = await gather(db, project, dt.datetime.now(dt.UTC))
+        summary = await gather(db, project, now)
         broken = next((p for p in summary.problems if p.level == "broken" and p.id), None)
         # A prompt for the coding agent for every open problem, each naming its own task.
         prompts = {p.id: agent_prompt(project, await db.get(Incident, p.id)) for p in summary.problems if p.id}
@@ -72,6 +77,8 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
                                  .where(SiteCheck.project_id == project.id)) or 0
         last_fixed = await db.scalar(select(func.max(Incident.ended_at)).where(Incident.project_id == project.id))
         items = {item.id: item for item in await setup_checklist(db, project)}
+        done = await done_this_week(db, project, now)
+        days = await seven_days(db, project, now)
     notice = {"test": f"A test alert is on its way to {places}.",
               "muted": "Done. We will not tell you about that again.",
               "smscode": "We texted you a code. Enter it below to turn texts on.",
@@ -100,13 +107,17 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
               "githuboff": "GitHub is disconnected. To remove the app from GitHub too, open your GitHub settings, "
                            "then Applications."}.get(sent or "")
     setup = setup_steps(project, summary, emailed, items)
-    return templates.TemplateResponse(request, "page.html", {
+    fix_now = [p for p in summary.problems if p.level == "broken"]
+    this_week = [p for p in summary.problems if p.level == "look"]
+    return {
         "page": summary, "token": token, "script_tag": script_tag(settings, project), "broken": broken,
         "prompt": prompt, "prompts": prompts, "alert_email": project.alert_email, "notice": notice, "setup": setup,
         "unfinished": [s for s in setup if not s["done"] and s.get("later") and not s.get("waiting")],
         "waiting_steps": [s for s in setup if s.get("waiting")],
+        "fix_now": fix_now, "this_week": this_week, "seen": [p for p in summary.problems if p.level == "quiet"],
+        "headline": headline(len(fix_now), len(this_week)), "done": done, "days": days,
         "paused": project.paused_at is not None, "checks": checks,
-        "since": f"{project.created_at:%-d %b}", "last_fixed": ago(last_fixed, dt.datetime.now(dt.UTC)) if last_fixed else None, "stalled": stalled(project),
+        "since": f"{project.created_at:%-d %b}", "last_fixed": ago(last_fixed, now) if last_fixed else None, "stalled": stalled(project),
         "texts": can_text(project, settings), "text_where": text_where(settings) if settings.text_prefixes else None, "sms_to": project.sms_to, "sms_pending": project.sms_pending,
         "needs_timezone": not project.timezone,
         "slack": settings.slack_configured and project.slack_enabled, "slack_channel": project.slack_channel,
@@ -124,7 +135,83 @@ async def page(request: Request, token: str, sent: str | None = None) -> HTMLRes
         "can_test": bool(project.alert_email) or slack.can_post(project, settings) or bool(devices)
                     or telegram.can_post(project, settings) or webhooks.can_post(project, settings)
                     or github.can_post(project, settings),
-    }, headers=PRIVATE)
+    }
+
+
+def headline(fix_now: int, this_week: int) -> str:
+    """The to-do page's first line: how much there is to do, and whether any of it is urgent."""
+    if fix_now:
+        return f"{'One thing' if fix_now == 1 else f'{fix_now} things'} to fix now."
+    if this_week:
+        return f"{'One thing' if this_week == 1 else f'{this_week} things'} to do. Nothing urgent."
+    return "Nothing to do."
+
+
+async def done_this_week(db, project: Project, now: dt.datetime) -> list[dict]:
+    """Problems that closed in the last seven days, and how: fixed, waved off by the owner, or
+    dismissed by the coding agent as not the site's own."""
+    closed = (await db.scalars(select(Incident).where(
+        Incident.project_id == project.id, Incident.ended_at >= now - dt.timedelta(days=7))
+        .order_by(Incident.ended_at.desc()).limit(50))).all()
+    waved = {(m.kind, m.key) for m in await db.scalars(select(Mute).where(Mute.project_id == project.id))
+             if m.by != "agent"}
+    out = []
+    for incident in closed:
+        reason = (incident.data or {}).get("dismissed_by_agent")
+        if reason:
+            how = f"Your coding agent said it isn't your site's problem: {reason}"
+        elif (incident.kind, incident.key) in waved:
+            how = f"You said it was fine, {ago(incident.ended_at, now)}."
+        else:
+            how = f"Fixed {ago(incident.ended_at, now)}."
+        out.append({"title": incident.title, "how": how})
+    return out
+
+
+async def seven_days(db, project: Project, now: dt.datetime) -> list[dict]:
+    """The last seven days in the owner's time zone, each with the worst trouble the site had that day."""
+    zone = local_zone(project.timezone) or dt.UTC
+    today = now.astimezone(zone).date()
+    first = dt.datetime.combine(today - dt.timedelta(days=6), dt.time(), zone)
+    rows = (await db.execute(select(Incident.level, Incident.started_at, Incident.ended_at).where(
+        Incident.project_id == project.id, Incident.kind.not_in(SITE_TROUBLE_SKIPS), Incident.started_at < now,
+        (Incident.ended_at.is_(None)) | (Incident.ended_at >= first)))).all()
+    created = project.created_at.astimezone(zone).date()
+    days = []
+    for n in range(7):
+        start = first + dt.timedelta(days=n)
+        end = start + dt.timedelta(days=1)
+        levels = {r.level for r in rows if r.started_at < end and (r.ended_at is None or r.ended_at >= start)}
+        state = "broken" if "broken" in levels else "look" if "look" in levels else \
+            "none" if start.date() < created else "working"
+        label = {"broken": "broken for a while", "look": "something needed a look", "working": "no trouble",
+                 "none": "not watched yet"}[state]
+        days.append({"state": state, "label": f"{start:%a %-d %b}: {label}"})
+    return days
+
+
+async def render_page(request: Request, token: str, sent: str | None, name: str, tab: str) -> HTMLResponse:
+    context = await page_context(request, token, sent)
+    return templates.TemplateResponse(request, name, {**context, "tab": tab, "domain": context["page"].domain},
+                                      headers=PRIVATE)
+
+
+@router.get("/d/{token}", response_class=HTMLResponse)
+async def page(request: Request, token: str, sent: str | None = None) -> HTMLResponse:
+    """What there is to do, most urgent first."""
+    return await render_page(request, token, sent, "page.html", "todo")
+
+
+@router.get("/d/{token}/week", response_class=HTMLResponse)
+async def week(request: Request, token: str, sent: str | None = None) -> HTMLResponse:
+    """The site this week: numbers, sales, pages, where visitors came from, jobs and history."""
+    return await render_page(request, token, sent, "week.html", "week")
+
+
+@router.get("/d/{token}/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, token: str, sent: str | None = None) -> HTMLResponse:
+    """Where alerts go, and the site's key."""
+    return await render_page(request, token, sent, "settings.html", "settings")
 
 
 def setup_steps(project: Project, summary, emailed: bool, items: dict | None = None) -> list[dict]:
@@ -192,7 +279,7 @@ async def test_alert(request: Request, token: str) -> RedirectResponse:
         request.app.state.limiter.check("test-alert", str(project.id), 5, 3600)
         await queue_test_alert(db, project, request.app.state.settings)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=test", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=test#test-alert", status_code=303)
 
 
 # ---- text messages ------------------------------------------------------------
@@ -207,13 +294,13 @@ async def sms_start(request: Request, token: str, number: str = Form(...)) -> Re
             raise HTTPException(403, "Text messages are not available for this site.")
         clean = normalize_number(number)
         if clean is None:
-            return RedirectResponse(f"/d/{token}?sent=badnumber#texts", status_code=303)
+            return RedirectResponse(f"/d/{token}/settings?sent=badnumber#texts", status_code=303)
         if settings.text_prefixes and not clean.startswith(tuple(settings.text_prefixes)):
-            return RedirectResponse(f"/d/{token}?sent=textcountry#texts", status_code=303)
+            return RedirectResponse(f"/d/{token}/settings?sent=textcountry#texts", status_code=303)
         request.app.state.limiter.check("sms", str(project.id), 3, 3600)
         start_confirming(db, project, settings, clean)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=smscode#texts", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=smscode#texts", status_code=303)
 
 
 @router.post("/d/{token}/sms/confirm")
@@ -223,7 +310,7 @@ async def sms_confirm(request: Request, token: str, code: str = Form(...)) -> Re
         request.app.state.limiter.check("sms-confirm", str(project.id), 10, 3600)
         ok = confirm(project, code)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent={'smson' if ok else 'smswrong'}#texts", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent={'smson' if ok else 'smswrong'}#texts", status_code=303)
 
 
 @router.post("/d/{token}/sms/remove")
@@ -232,7 +319,7 @@ async def sms_remove(request: Request, token: str) -> RedirectResponse:
         project = await project_by_token(request, db, token)
         project.sms_to = project.sms_pending = project.sms_code_hash = None
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=smsoff#texts", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=smsoff#texts", status_code=303)
 
 
 # ---- Slack --------------------------------------------------------------------
@@ -273,7 +360,7 @@ async def slack_callback(request: Request, state: str = "", code: str = "", erro
         if problem is None:
             slack.post_connected(db, project, settings)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent={'slackno' if problem else 'slackon'}#slack", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent={'slackno' if problem else 'slackon'}#slack", status_code=303)
 
 
 @router.post("/d/{token}/slack/remove")
@@ -282,7 +369,7 @@ async def slack_remove(request: Request, token: str) -> RedirectResponse:
         project = await project_by_token(request, db, token)
         await slack.disconnect(request.app.state.http, project)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=slackoff#slack", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=slackoff#slack", status_code=303)
 
 
 # ---- Telegram -------------------------------------------------------------------
@@ -298,7 +385,7 @@ async def telegram_start(request: Request, token: str) -> RedirectResponse:
         request.app.state.limiter.check("telegram", str(project.id), 10, 3600)
         telegram.start_connecting(project)
         await db.commit()
-    return RedirectResponse(f"/d/{token}#telegram", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings#telegram", status_code=303)
 
 
 @router.post("/telegram/webhook")
@@ -329,7 +416,7 @@ async def telegram_remove(request: Request, token: str) -> RedirectResponse:
         project = await project_by_token(request, db, token)
         await telegram.disconnect(db, project)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=telegramoff#telegram", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=telegramoff#telegram", status_code=303)
 
 
 # ---- a signed webhook -------------------------------------------------------------
@@ -350,7 +437,7 @@ async def webhook_add(request: Request, token: str, url: str = Form(...)):
             raise HTTPException(403, "Webhooks are not available for this site.")
         request.app.state.limiter.check("webhook", str(project.id), 10, 3600)
         if await webhooks.check_url_resolves_publicly(url):
-            return RedirectResponse(f"/d/{token}?sent=webhookbad#webhook", status_code=303)
+            return RedirectResponse(f"/d/{token}/settings?sent=webhookbad#webhook", status_code=303)
         webhooks.connect(project, url)
         await db.commit()
     return show_secret(request, project, token, new=True)
@@ -382,7 +469,7 @@ async def webhook_test(request: Request, token: str) -> RedirectResponse:
         await db.commit()
     if not queued:
         raise HTTPException(400, "There is no webhook to test.")
-    return RedirectResponse(f"/d/{token}?sent=webhooktest#webhook", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=webhooktest#webhook", status_code=303)
 
 
 @router.post("/d/{token}/webhook/remove")
@@ -391,7 +478,7 @@ async def webhook_remove(request: Request, token: str) -> RedirectResponse:
         project = await project_by_token(request, db, token)
         webhooks.disconnect(project)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=webhookoff#webhook", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=webhookoff#webhook", status_code=303)
 
 
 # ---- GitHub issues ----------------------------------------------------------------
@@ -519,7 +606,7 @@ async def github_callback(request: Request, code: str = "", state: str = "", ins
         if problem:
             project.github_note, sent = problem, "githubno"
         await db.commit()
-    response = RedirectResponse(f"/d/{token}?sent={sent}#github", status_code=303)
+    response = RedirectResponse(f"/d/{token}/settings?sent={sent}#github", status_code=303)
     response.delete_cookie(GITHUB_COOKIE)
     if pick_nonce:
         _set_cookie(response, settings, GITHUB_PICK_COOKIE, f"{project_id.hex}.{pick_nonce}", github.PICK_LIFE)
@@ -537,7 +624,7 @@ async def github_pick(request: Request, token: str, choice: str = Form(...)) -> 
             raise HTTPException(400, "That repository wasn't in the list GitHub gave, or the list ran out "
                                      "(it lasts 10 minutes). Connect GitHub again.")
         await db.commit()
-    response = RedirectResponse(f"/d/{token}?sent=githubon#github", status_code=303)
+    response = RedirectResponse(f"/d/{token}/settings?sent=githubon#github", status_code=303)
     response.delete_cookie(GITHUB_PICK_COOKIE)
     return response
 
@@ -555,7 +642,7 @@ async def github_settings(request: Request, token: str, look: str = Form(""), me
         project.github_assignees = ", ".join(names) or None
         project.github_note = None
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=githubsaved#github", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=githubsaved#github", status_code=303)
 
 
 @router.post("/d/{token}/github/test")
@@ -567,7 +654,7 @@ async def github_test(request: Request, token: str) -> RedirectResponse:
         await db.commit()
     if not queued:
         raise HTTPException(400, "Pick a repository first.")
-    return RedirectResponse(f"/d/{token}?sent=githubtest#github", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=githubtest#github", status_code=303)
 
 
 @router.post("/d/{token}/github/remove")
@@ -576,7 +663,7 @@ async def github_remove(request: Request, token: str) -> RedirectResponse:
         project = await project_by_token(request, db, token)
         await github.disconnect(db, project)
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=githuboff#github", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=githuboff#github", status_code=303)
 
 
 # ---- notifications on a device ---------------------------------------------------
@@ -636,7 +723,7 @@ async def push_remove(request: Request, token: str, device_id: int) -> RedirectR
         await db.delete(device)
         project.push_error = None
         await db.commit()
-    return RedirectResponse(f"/d/{token}?sent=pushoff#push", status_code=303)
+    return RedirectResponse(f"/d/{token}/settings?sent=pushoff#push", status_code=303)
 
 
 # ---- a new secret key ---------------------------------------------------------

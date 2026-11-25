@@ -80,13 +80,13 @@ def connect(db, project):
 
 
 def test_connecting_a_chat(chatting, client, db, project):
-    assert "Connect Telegram" not in page_text(client, project), "not offered when the server has no bot"
-    assert "Connect Telegram" in page_text(chatting, project)
+    assert "Connect Telegram" not in page_text(client, project, "settings"), "not offered when the server has no bot"
+    assert "Connect Telegram" in page_text(chatting, project, "settings")
 
     assert chatting.post(f"/d/{project.page_token}/telegram").status_code == 303
     db.refresh(project)
     code = project.telegram_code
-    page = chatting.get(f"/d/{project.page_token}").text
+    page = chatting.get(f"/d/{project.page_token}/settings").text
     assert f"https://t.me/ProdbatBot?start={code}" in page and f"https://t.me/ProdbatBot?startgroup={code}" in page
 
     assert chatting.post("/telegram/webhook", json=start(f"/start {code}")).status_code == 403, "no secret"
@@ -107,14 +107,14 @@ def test_connecting_a_chat(chatting, client, db, project):
     db.refresh(project)
     assert project.telegram_chat_id == 4242
 
-    assert "Alerts also go to Ann Lee in Telegram" in page_text(chatting, project)
+    assert "Alerts also go to Ann Lee in Telegram" in page_text(chatting, project, "settings")
     assert chatting.post(f"/d/{project.page_token}/test-alert").status_code == 303
     assert messages(db)[-1].text.startswith("<b>Test: this is what a Prodbat alert")
     assert "on its way to you@example.com and Ann Lee in Telegram" in \
-        chatting.get(f"/d/{project.page_token}?sent=test").text
+        chatting.get(f"/d/{project.page_token}/settings?sent=test").text
 
     gone = chatting.post(f"/d/{project.page_token}/telegram/remove")
-    assert gone.headers["location"] == f"/d/{project.page_token}?sent=telegramoff#telegram"
+    assert gone.headers["location"] == f"/d/{project.page_token}/settings?sent=telegramoff#telegram"
     db.refresh(project)
     assert project.telegram_chat_id is None and project.telegram_chat is None
 
@@ -135,7 +135,7 @@ def test_a_group_and_codes_that_dont_work(chatting, db, project):
     project.telegram_code_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)
     db.commit()
     assert "run out" in hook(start(f"/start {code}"))["text"]
-    assert f"start={code}" not in chatting.get(f"/d/{project.page_token}").text, "an old link is not shown"
+    assert f"start={code}" not in chatting.get(f"/d/{project.page_token}/settings").text, "an old link is not shown"
 
     chatting.post(f"/d/{project.page_token}/telegram")
     db.refresh(project)
@@ -144,15 +144,15 @@ def test_a_group_and_codes_that_dont_work(chatting, db, project):
     assert answer["chat_id"] == -100123 and answer["text"].startswith("Connected.")
     db.refresh(project)
     assert (project.telegram_chat_id, project.telegram_chat) == (-100123, "Ops <team>")
-    assert "Alerts also go to Ops <team> in Telegram" in page_text(chatting, project)
-    assert "Ops &lt;team&gt;" in chatting.get(f"/d/{project.page_token}").text
+    assert "Alerts also go to Ops <team> in Telegram" in page_text(chatting, project, "settings")
+    assert "Ops &lt;team&gt;" in chatting.get(f"/d/{project.page_token}/settings").text
 
 
 def test_unconfigured_or_plan_disabled(client, chatting, db, project):
     assert client.post("/telegram/webhook", json=start("/start x"), headers=SECRET).status_code == 404
     project.telegram_enabled = False
     db.commit()
-    assert "Connect Telegram" not in page_text(chatting, project)
+    assert "Connect Telegram" not in page_text(chatting, project, "settings")
     assert chatting.post(f"/d/{project.page_token}/telegram").status_code == 403
     connect(db, project)
     run(lambda sessions: _report(sessions, "x"), db)
@@ -219,7 +219,7 @@ def test_a_blocked_bot_stops_and_says_so(db, project, bot, chatting):
     db.refresh(project)
     assert project.telegram_error == telegram.BLOCKED and project.telegram_chat_id is None
     assert messages(db)[0].attempts == 5, "not retried"
-    page = page_text(chatting, project)
+    page = page_text(chatting, project, "settings")
     assert "Prodbat's bot was blocked" in page and "Connect Telegram again" in page
     run(lambda sessions: _report(sessions, "y", key="other"), db)
     assert len(messages(db)) == 1, "nothing more is queued until it is connected again"

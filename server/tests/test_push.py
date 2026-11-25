@@ -95,8 +95,8 @@ def devices(db):
 
 
 def test_turning_notifications_on_and_off(pushing, client, db, project, service):
-    assert "Phone notifications" not in page_text(client, project), "not offered without VAPID keys"
-    page = pushing.get(f"/d/{project.page_token}").text
+    assert "Phone notifications" not in page_text(client, project, "settings"), "not offered without VAPID keys"
+    page = pushing.get(f"/d/{project.page_token}/settings").text
     assert "Notify me on this device" in page and PUBLIC in page
     assert f'href="/d/{project.page_token}/manifest.webmanifest"' in page and "apple-touch-icon" in page
 
@@ -113,14 +113,14 @@ def test_turning_notifications_on_and_off(pushing, client, db, project, service)
     assert hello["title"] == "Prodbat alerts for yourapp.com will show here"
     assert hello["url"] == f"https://pb.example/d/{project.page_token}"
 
-    assert "Chrome on Android" in page_text(pushing, project)
+    assert "Chrome on Android" in page_text(pushing, project, "settings")
     assert pushing.post(f"/d/{project.page_token}/test-alert").status_code == 303
     assert messages(db)[-1].title == "Test: a Prodbat alert for yourapp.com"
-    assert "on its way to you@example.com and 1 device" in pushing.get(f"/d/{project.page_token}?sent=test").text
+    assert "on its way to you@example.com and 1 device" in pushing.get(f"/d/{project.page_token}/settings?sent=test").text
 
     device = devices(db)[0]
     gone = pushing.post(f"/d/{project.page_token}/push/{device.id}/remove")
-    assert gone.headers["location"] == f"/d/{project.page_token}?sent=pushoff#push"
+    assert gone.headers["location"] == f"/d/{project.page_token}/settings?sent=pushoff#push"
     assert devices(db) == []
 
 
@@ -206,7 +206,7 @@ def test_a_device_that_is_gone_is_removed(db, project, service, pushing):
     assert deliver(db, service) == 1
     assert [d.endpoint for d in devices(db)] == [two.endpoint]
     assert messages(db)[0].sent_at is not None
-    assert "Phone 1 stopped accepting notifications" in page_text(pushing, project)
+    assert "Phone 1 stopped accepting notifications" in page_text(pushing, project, "settings")
 
 
 def test_a_failing_push_service_is_tried_again(db, project, service):
@@ -227,7 +227,7 @@ def test_a_failing_push_service_is_tried_again(db, project, service):
 def test_a_plan_without_notifications_sends_nothing(db, project, pushing):
     project.push_enabled = False
     db.commit()
-    assert "Phone notifications" not in page_text(pushing, project)
+    assert "Phone notifications" not in page_text(pushing, project, "settings")
     assert pushing.post(f"/d/{project.page_token}/push", json=Phone().subscription()).status_code == 403
     run(lambda sessions: _report(sessions, "x"), db)
     assert messages(db) == []

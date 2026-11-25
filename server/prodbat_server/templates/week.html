@@ -1,0 +1,103 @@
+{% extends "_page_base.html" %}
+{% from "_macros.html" import tick, warn, ring %}
+{% block title %}This week on{% endblock %}
+{% block style %}
+.numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); overflow: hidden; }
+.numbers div { padding: 22px 24px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--soft); border-bottom: 1px solid var(--soft); margin: 0 -1px -1px 0; }
+.numbers b { font: 800 40px/1.05 Archivo, Inter, sans-serif; letter-spacing: -0.01em; }
+.lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); gap: 24px; }
+.event { display: flex; gap: 20px; padding: 12px 0; border-top: 1px solid var(--soft); }
+.event .muted { flex: 0 0 58px; }
+.seen { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--soft); }
+.seen svg { flex: none; margin-top: 2px; }
+.seen div { min-width: 0; overflow-wrap: anywhere; }
+.seen span { display: block; color: var(--muted); font-size: 15px; }
+{% endblock %}
+{% block main %}
+<div>
+<h1 class="display">{{ page.domain }} this week</h1>
+<p class="lede">Who came, what they bought and what happened. Nothing here needs you; anything that does is on <a href="/d/{{ token }}">To do</a>.</p>
+</div>
+
+<section class="card numbers" aria-label="This week in numbers">
+{% for n in page.numbers %}<div><span class="muted">{{ n.label }}</span><b>{{ n.value }}</b><span class="muted">{{ n.note }}</span></div>
+{% endfor %}
+</section>
+
+<section class="lists">
+<div class="card list">
+<div class="list-head"><h2>What sells</h2><span class="muted">from Stripe</span></div>
+{% if not page.payments_connected %}
+<p class="empty">Payments show up here once your Stripe webhook forwards its events. Your coding agent can set it up: it's on <a href="/d/{{ token }}">To do</a>, under Worth doing someday.</p>
+{% else %}
+<div class="rows">
+{% for row in page.sells %}<div class="row"><span>{{ row.name }}</span><b><span class="muted">{{ row.count }} {{ 'payment' if row.count == 1 else 'payments' }}</span>&nbsp;&nbsp;{{ row.amount }}</b></div>
+{% else %}{% if page.stripe == 'paying' %}<p class="empty">No payments this week.</p>{% endif %}
+{% endfor %}
+</div>
+<p class="empty">{{ page.last_payment }}</p>
+{% if page.buyers %}
+<div class="list-head"><h2>Where buyers came from</h2><span class="muted">this week</span></div>
+<div class="rows">
+{% for row in page.buyers %}<div class="row"><span>{{ row.name }}</span><b><span class="muted">{{ row.count }} {{ 'payment' if row.count == 1 else 'payments' }}</span>&nbsp;&nbsp;{{ row.amount }}</b></div>
+{% endfor %}
+</div>
+{% endif %}
+{% endif %}
+</div>
+
+<div class="card list">
+<div class="list-head"><h2>Where visitors came from</h2><span class="muted">visitors</span></div>
+<div class="rows">
+{% for row in page.sources %}<div class="row"><span>{{ row.name }}{% if row.tag %} <span class="muted">{{ row.tag }}</span>{% endif %}</span><b>{{ "{:,}".format(row.count) }}</b></div>
+{% else %}<p class="empty">No visitors this week.</p>
+{% endfor %}
+</div>
+</div>
+
+<div class="card list">
+<div class="list-head"><h2>Pages</h2><span class="muted">visitors</span></div>
+<div class="rows">
+{% for row in page.pages %}<div class="row"><span class="mono">{{ row.name }}</span><b>{{ "{:,}".format(row.count) }}</b></div>
+{% else %}<p class="empty">No page views this week.</p>
+{% endfor %}
+</div>
+</div>
+
+{% if page.work %}
+<div class="card list">
+<div class="list-head"><h2>Background jobs</h2></div>
+<div class="rows">
+{% for name, state in page.work %}<div class="row"><span>{{ name }}</span><span class="muted">{{ state }}</span></div>
+{% endfor %}
+</div>
+</div>
+{% endif %}
+</section>
+
+{% if seen or page.happened %}
+<section class="lists">
+{% if page.happened %}
+<div class="card list">
+<h2>What happened</h2>
+<div class="rows">
+{% for date, sentence in page.happened %}<div class="event"><span class="muted">{{ date }}</span><span>{{ sentence }}</span></div>
+{% endfor %}
+</div>
+</div>
+{% endif %}
+{% if seen %}
+<div class="card list">
+<div class="list-head"><h2>Seen, but not a problem yet</h2></div>
+<p class="muted">Once a visitor each. If more people hit one, it moves to To do.</p>
+<div class="rows">
+{% for problem in seen %}<div class="seen">{{ ring(20) }}<div>{{ problem.title }}<span>{{ problem.detail }}</span></div></div>
+{% endfor %}
+</div>
+</div>
+{% endif %}
+</section>
+{% endif %}
+
+{% if page.has_logs %}<p class="muted">Every log line your server sends is in <a href="/d/{{ token }}/logs">Logs</a>, under Technical details.</p>{% endif %}
+{% endblock %}

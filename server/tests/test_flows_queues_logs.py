@@ -8,7 +8,7 @@ from prodbat_server.freshness import find_cycle, supported_cycle
 from prodbat_server.models import Dependency, Incident, LogLine, QueueReport, ServerError, SiteCheck
 from prodbat_server.worker import prune
 
-from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_text, run, run_checks, run_jobs, view
+from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_and_week, page_text, run, run_checks, run_jobs, view
 
 
 def incidents(db):
@@ -47,7 +47,7 @@ def test_one_failed_checkout_is_enough_and_the_alert_says_what_people_cannot_do(
     assert incident.what == ("POST /api/checkout answered with an error (500) for 1 visitor in the last 15 minutes. "
                              "This is part of your checkout.")
     assert emails(db)[0].subject == "Broken: People cannot pay on yourapp.com"
-    assert "People cannot pay." in page_text(client, project)
+    assert "People cannot pay." in page_and_week(client, project)
 
 
 def test_a_server_error_while_signing_in_is_broken_at_once_and_an_ordinary_one_is_not(client, db, project, key):
@@ -112,7 +112,7 @@ def test_a_queue_is_reported_and_shown_with_what_is_waiting(client, db, project,
     db.add(view(project, "a"))
     evaluate(db)
     assert incidents(db) == []
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Background jobs" in text and "emails queue 3 jobs waiting, the oldest for 1 minute, as of" in text
 
 
@@ -196,7 +196,7 @@ def test_log_lines_are_stored_found_and_shown(client, db, project, key):
     assert "kept for 7 days" in html
     db.add(view(project, "a"))
     db.commit()
-    assert "Logs" in page_text(client, project)
+    assert "Logs" in page_and_week(client, project)
 
 
 def test_a_flood_of_log_lines_is_cut_off_not_refused(client, project, key):
@@ -307,7 +307,7 @@ def test_a_supported_node_that_missed_security_releases_needs_a_look_and_python_
     assert "move to Node.js 24.9.0" in incident.todo
     db.add(view(project, "a"))
     db.commit()
-    assert "Python 3.12.1 is behind 3.12.8, the newest release of the same line." in page_text(client, project)
+    assert "Python 3.12.1 is behind 3.12.8, the newest release of the same line." in page_and_week(client, project)
 
 
 def test_deprecated_packages_and_packages_behind(client, db, project, key, site):
@@ -350,7 +350,7 @@ def test_deprecated_packages_and_packages_behind(client, db, project, key, site)
 
     db.add(view(project, "a"))
     db.commit()
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "2 packages are a major version behind: next 14.2.3 → 16.4.6, django 4.2.11 → 5.2.8." in text
     assert "1 package your app pulls in indirectly is deprecated by its authors." in text
     status = client.get("/api/status", headers=key).json()["text"]

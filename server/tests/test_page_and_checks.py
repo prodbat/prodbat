@@ -6,7 +6,7 @@ from prodbat_server.checks import CHECK_EVERY, apply_expiry, refresh_expiry
 from prodbat_server.models import Incident, Project, SiteCheck
 from prodbat_server.words import ago, compared, every, lasted, money
 
-from .helpers import NOW, SETTINGS, days_ago, emails, http_client, page_text, run, run_checks, view
+from .helpers import NOW, SETTINGS, days_ago, emails, http_client, page_and_week, page_text, run, run_checks, view
 
 
 def make_due(db, project):
@@ -24,7 +24,7 @@ def test_page_needs_the_secret_link(client, project):
 
 
 def test_before_any_data_it_says_it_is_waiting_and_shows_the_script_tag(client, project):
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Waiting for your first visitor." in text
     assert 'data-site="pb_test"' in text
     assert "Everything is working." not in text
@@ -39,7 +39,7 @@ def test_a_quiet_week_says_everything_is_working_with_numbers_and_lists(client, 
         view(project, "old", "/", "Google", "search", days_ago(9)),  # last week: not counted
     ])
     db.commit()
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Everything is working." in text
     assert "Last heard from your site 30 minutes ago." in text
     assert "Visitors 3" in text
@@ -52,7 +52,7 @@ def test_a_quiet_week_says_everything_is_working_with_numbers_and_lists(client, 
     db.add(Incident(project_id=project.id, kind="server", key="s1", level="look", title="t", what="w", who="w",
                     started_at=NOW - dt.timedelta(hours=3), ended_at=NOW - dt.timedelta(hours=2)))
     db.commit()
-    later = page_text(client, project)
+    later = page_and_week(client, project)
     assert "Nothing has broken since" not in later
     assert "Nothing is wrong right now. The last problem was fixed 2 hours ago." in later
     # Each visitor counts once, under where they first arrived from.
@@ -62,7 +62,7 @@ def test_a_quiet_week_says_everything_is_working_with_numbers_and_lists(client, 
     assert "last week" not in text  # a new project has nothing to compare with
     # The first suggestion that applies is offered as a line for the agent.
     assert "Run `npx prodbat suggestions S-01` and follow it." in text
-    assert "Alerts go to you@example.com." in text
+    assert "Alerts go to you@example.com." in page_text(client, project, "settings")
 
 
 def test_send_me_a_test_alert(client, db, project):
@@ -113,7 +113,7 @@ def test_two_failed_loads_are_broken_and_emailed_and_a_good_load_says_working_ag
     assert "Who is affected: Everyone who visits." in emails(db)[0].body
 
     # Broken shows even though no visitor data has ever arrived.
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Your site is broken right now." in text and "Your site is not loading." in text
 
     make_due(db, project)
@@ -144,14 +144,14 @@ def test_a_past_outage_is_listed_under_what_happened(client, db, project):
     db.add(Incident(project_id=project.id, kind="down", level="broken", started_at=start,
                     ended_at=start + dt.timedelta(minutes=7), title="Your site is not loading", what="w", who="w"))
     db.commit()
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Everything is working." in text
     assert f"{start.day} {start:%b} Your site did not load for 7 minutes." in text
 
 
 def test_a_new_site_that_loads_but_has_no_script_yet_is_still_waiting(client, db, project, site):
     run_checks(db, site)
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Waiting for your first visitor." in text and "Your site loads from outside." in text
 
 
@@ -175,7 +175,7 @@ def test_expiry_dates_are_looked_up_and_a_certificate_about_to_run_out_needs_a_l
 
     db.add(view(project, "a"))
     db.commit()
-    assert "Your domain needs renewing in 61 days." in page_text(client, project)
+    assert "Your domain needs renewing in 61 days." in page_and_week(client, project)
 
     # Once it has been renewed the problem closes by itself, without an email.
     async def renewed(sessions):

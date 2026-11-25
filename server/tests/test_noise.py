@@ -10,7 +10,7 @@ from prodbat_server.models import BrowserError, Incident, LogLine, Mute, ServerE
 from prodbat_server.noise import ELSEWHERE, SITE, browser_name, classify
 from prodbat_server.summary import evidence_for
 
-from .helpers import NOW, failure, minutes_ago, run, evaluate, page_text, view
+from .helpers import NOW, failure, minutes_ago, run, evaluate, page_and_week, page_text, view
 from .test_api import rpc
 
 SAFARI = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) "
@@ -158,7 +158,7 @@ def test_the_agent_dismisses_a_task_that_is_not_the_sites_problem(client, db, pr
     # The owner sees what the agent decided, and why.
     db.add(view(project, "a"))
     db.commit()
-    assert f"Your coding agent dismissed “An error in your code on /onboarding”: {reason}" in page_text(client, project)
+    assert f"Your coding agent dismissed “An error in your code on /onboarding”: {reason}" in page_and_week(client, project)
 
     # More visitors, but not many more: still dismissed.
     two_visitors_hit(db, project, visitors="cdefg", ts=dt.datetime.now(dt.UTC))

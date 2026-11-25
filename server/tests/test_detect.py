@@ -5,7 +5,7 @@ from sqlalchemy import select
 from prodbat_server.mailer import build, send_pending
 from prodbat_server.models import BrowserError, Incident, Job, ServerError
 
-from .helpers import NOW, SETTINGS, emails, evaluate, failure, minutes_ago, page_text, run, view
+from .helpers import NOW, SETTINGS, emails, evaluate, failure, minutes_ago, page_and_week, page_text, run, view
 
 
 def incidents(db):
@@ -30,10 +30,10 @@ def test_a_route_failing_for_three_visitors_is_broken_and_emailed_once(client, d
     assert f"Run `npx prodbat task T{incident.id}`" in email.body and f"`npx prodbat done T{incident.id}`" in email.body
     assert f"https://pb.example/d/{project.page_token}" in email.body
 
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Your site is broken right now." in text
     assert "POST /api/save is failing." in text
-    assert "Copy this for your coding agent" in text
+    assert "Copy the fix for your agent" in text and "What your agent will be told" in text
 
 
 def test_when_the_failures_stop_it_closes_with_a_working_again_in_the_same_thread(db, project):
@@ -78,7 +78,7 @@ def test_one_visitor_hitting_one_error_is_listed_but_not_a_problem(client, db, p
     db.add_all([view(project, "a"), failure(project, "a", minutes_ago(5))])
     evaluate(db)
     assert incidents(db) == [] and emails(db) == []
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Everything is working." in text
     assert "POST /api/save answered with an error (500). 1 visitor affected" in text
 
@@ -91,7 +91,7 @@ def test_a_browser_error_seen_by_two_visitors_needs_a_look(client, db, project):
     incident, = incidents(db)
     assert (incident.level, incident.title) == ("look", "An error in your code on /signup")
     assert incident.what == "“x is not defined” (app.js, line 12)."
-    assert "Something needs a look." in page_text(client, project)
+    assert "Something needs a look." in page_and_week(client, project)
 
 
 def test_this_is_fine_stop_telling_me(client, db, project):
@@ -107,7 +107,7 @@ def test_this_is_fine_stop_telling_me(client, db, project):
     db.add_all([failure(project, v, minutes_ago(1)) for v in "def"])
     evaluate(db)
     assert len(incidents(db)) == 1 and len(emails(db)) == 1  # stays quiet
-    assert "Everything is working." in page_text(client, project)
+    assert "Everything is working." in page_and_week(client, project)
     assert client.post(f"/d/wrong/mute/{incident.id}").status_code == 404
 
 

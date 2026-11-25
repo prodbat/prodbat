@@ -8,7 +8,7 @@ from prodbat_server.models import Dependency, Incident, Job, PackageFacts, Payme
 from prodbat_server.stripe_events import product_name
 from prodbat_server.weekly import send_weekly
 
-from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_text, run, run_jobs, view
+from .helpers import NOW, SETTINGS, days_ago, emails, evaluate, failure, http_client, minutes_ago, page_and_week, page_text, run, run_jobs, view
 
 ADMIN = {"authorization": "Bearer admin"}
 
@@ -121,7 +121,7 @@ def test_forwarded_stripe_events_become_what_sells(client, db, project, key):
     assert [(p.stripe_id, p.amount, p.product, p.source) for p in payments] == [
         ("cs_1", 9900, "Lifetime deal", "ChatGPT"), ("in_1", 1900, "Pro plan", None), ("in_2", 1900, "Pro plan", None)]
 
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Payments 3" in text and "Paid $137" in text
     assert "Lifetime deal 1 payment $99" in text and "Pro plan 2 payments $38" in text
     assert "Last payment: 1 minute ago." in text
@@ -132,14 +132,14 @@ def test_forwarded_stripe_events_become_what_sells(client, db, project, key):
 def test_stripe_shows_as_connected_before_the_first_payment(client, db, project, key):
     db.add(view(project, "someone", "/", "ChatGPT", "ai"))
     db.commit()
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Payments show up here once your Stripe webhook forwards its events." in text
     assert "Stripe is not connected yet" in text
 
     # The agent says it finished the Stripe step; nothing has arrived yet.
     db.execute(update(Project).where(Project.id == project.id).values(setup_waiting={"S-01": NOW.isoformat()}))
     db.commit()
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "forwards its events" not in text and "not connected" not in text
     assert "Your coding agent set up Stripe forwarding." in text
     assert "Set up; waiting for the first payment" in text
@@ -147,7 +147,7 @@ def test_stripe_shows_as_connected_before_the_first_payment(client, db, project,
 
     # Any forwarded event, even one that is not a payment, shows Stripe is connected.
     client.post("/api/stripe", json={"type": "customer.created", "data": {"object": {}}}, headers=key)
-    text = page_text(client, project)
+    text = page_and_week(client, project)
     assert "Stripe is connected. No payments have come in yet" in text
     assert "Stripe is connected; no payments yet" in text and "No payments this week." not in text
     assert "S-01" not in text  # the setup item counts as done
@@ -280,7 +280,7 @@ def test_a_serious_fixed_problem_in_a_dependency_needs_a_look_until_it_is_upgrad
     assert len(emails(db)) == 1
     db.add(view(project, "a"))
     db.commit()
-    assert "1 other known security problem in your packages, not rated serious or with no fix yet." in page_text(client, project)
+    assert "1 other known security problem in your packages, not rated serious or with no fix yet." in page_and_week(client, project)
     assert "- jinja2 3.1.0: GHSA-low: Minor (low, fixed in 3.1.5)" in client.get("/api/status", headers=key).json()["text"]
     assert emails(db)[0].subject == "Needs a look: lodash has a serious security problem on yourapp.com"
 

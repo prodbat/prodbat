@@ -35,8 +35,8 @@ def test_numbers_need_a_country_code():
 
 
 def test_a_number_is_confirmed_with_a_texted_code(texting, client, db, project):
-    assert "Text messages" not in page_text(client, project), "not offered when the server can't send texts"
-    assert "Text me a code" in page_text(texting, project)
+    assert "Text messages" not in page_text(client, project, "settings"), "not offered when the server can't send texts"
+    assert "Text me a code" in page_text(texting, project, "settings")
 
     base = f"/d/{project.page_token}"
     assert "country code" in texting.post(f"{base}/sms", data={"number": "555 1234"}).text
@@ -98,7 +98,7 @@ def test_texts_can_be_limited_to_some_countries(db, site, project):
     us_only = TEXTING.model_copy(update={"text_countries": "+1"})
     with TestClient(create_app(us_only, http=http_client(site)), headers={"user-agent": BROWSER}) as client:
         base = f"/d/{project.page_token}"
-        assert "US numbers (+1)" in client.get(base).text
+        assert "US numbers (+1)" in client.get(f"{base}/settings").text
         refused = client.post(f"{base}/sms", data={"number": "+44 7700 900123"}).text
         assert "Texts can only go to US numbers (+1)" in refused
         assert texts(db) == []

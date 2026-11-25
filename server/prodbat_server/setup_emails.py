@@ -32,7 +32,7 @@ def live_email(project: Project, settings: Settings, packages: int) -> tuple[str
         *[f"  - {line}" for line in watched],
         "",
         "To see what an alert looks like and make sure it reaches your inbox, send yourself a test:",
-        f"  {page}#test-alert",
+        f"  {page}/settings#test-alert",
         "",
         f"Your page: {page}",
     ])

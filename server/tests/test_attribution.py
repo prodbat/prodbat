@@ -3,7 +3,7 @@ from sqlalchemy import select
 from prodbat_server.models import Attribution, Payment
 from prodbat_server.stripe_events import invoice_subscription
 
-from .helpers import NOW, page_text, view
+from .helpers import NOW, page_and_week, page_text, view
 from .test_api import invoice
 from .test_explore import text_of
 
@@ -49,7 +49,7 @@ def test_every_renewal_of_a_subscription_is_credited_to_where_the_buyer_came_fro
     client.post("/api/stripe", json=renewal("in_3", "sub_B"), headers=key)
     assert db.scalar(select(Payment.source).where(Payment.stripe_id == "in_3")) is None
 
-    page = page_text(client, project)
+    page = page_and_week(client, project)
     assert "Where buyers came from this week ChatGPT 2 payments $38" in page
     metrics = text_of(client, f"/d/{project.page_token}/metrics", range="7d")
     assert "Revenue by source" in metrics and "ChatGPT 2 $38" in metrics and "Not traced 1 $19" in metrics
@@ -61,5 +61,5 @@ def test_a_plan_without_attribution_does_not_show_it(client, db, project, key):
     db.commit()
     client.post("/api/stripe", json=renewal("in_9", "sub_C"), headers=key)
     client.post("/api/stripe", json=subscription_checkout("sub_C", "r2"), headers=key)
-    assert "Where buyers came from" not in page_text(client, project)
+    assert "Where buyers came from" not in page_and_week(client, project)
     assert "Revenue by source" not in text_of(client, f"/d/{project.page_token}/metrics")

@@ -1,22 +1,23 @@
-{# The side menu's styles. On a phone it becomes a bar over the page with the views in a row that scrolls sideways. #}
-.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+{# The header's styles. On a phone the views scroll sideways in one row. #}
+.shell { display: block; min-height: 100vh; }
 .shell > .content { min-width: 0; }
-.side { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 18px 12px; background: #EDEFE9; border-right: 1px solid #DADDD5; }
-.side .brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px; color: #15181B; font-weight: 600; font-size: 15px; text-decoration: none; overflow-wrap: anywhere; }
-.side .brand svg { flex: none; }
-.views { display: flex; flex-direction: column; gap: 2px; }
-.views a { padding: 8px 10px; border-radius: 8px; color: #555C63; font-size: 14px; font-weight: 500; text-decoration: none; }
-.views a:hover { background: #E2E5DD; color: #15181B; }
-.views a[aria-current="page"] { background: #FFFFFF; color: #15181B; box-shadow: 0 0 0 1px #DADDD5; }
-.side .account { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 12px; border-top: 1px solid #DADDD5; }
-.side .account a { padding: 6px 10px; border-radius: 8px; color: #555C63; font-size: 13px; text-decoration: none; }
-.side .account a:hover { background: #E2E5DD; color: #15181B; }
+.top { background: #FFFFFF; border-bottom: 1px solid #D5D8D0; }
+.top-in { max-width: 1160px; margin: 0 auto; padding: 10px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
+.top .brand { display: flex; align-items: center; gap: 10px; color: #121416; font-weight: 700; font-size: 16px; text-decoration: none; overflow-wrap: anywhere; min-height: 44px; }
+.top .brand svg { flex: none; }
+.top .views { display: flex; gap: 4px; flex-wrap: wrap; }
+.top .views a, .top .technical a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 8px; color: #3A4045; font-size: 15px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.top .views a:hover, .top .technical a:hover { background: #E8EAE3; color: #121416; }
+.top .views a[aria-current] { background: #E8EAE3; color: #121416; font-weight: 600; }
+.top .account { margin-left: auto; display: flex; gap: 4px 16px; font-size: 14px; }
+.top .account a { color: #3A4045; min-height: 44px; display: inline-flex; align-items: center; }
+.top .technical { border-top: 1px solid #E8EAE3; background: #F8F9F5; }
+.top .technical .top-in { padding-top: 4px; padding-bottom: 4px; gap: 2px; }
+.top .technical a { font-size: 14px; min-height: 40px; }
+.top .technical a[aria-current="page"] { background: #FFFFFF; color: #121416; font-weight: 600; box-shadow: 0 0 0 1px #D5D8D0; }
+.top a:focus-visible { outline: 3px solid #1B7245; outline-offset: 2px; }
 @media (max-width: 800px) {
-  .shell { display: block; }
-  .side { position: relative; height: auto; gap: 8px; padding: 12px 0 0; border-right: 0; border-bottom: 1px solid #DADDD5; }
-  .side .brand { padding: 4px 14px; }
-  .side:has(.account) .brand { padding-right: 170px; }
-  .views { flex-direction: row; overflow-x: auto; padding: 0 10px 10px; }
-  .views a { white-space: nowrap; }
-  .side .account { position: absolute; top: 10px; right: 10px; flex-direction: row; margin: 0; padding: 0; border: 0; }
+  .top-in { padding: 8px 14px; }
+  .top .views, .top .technical .top-in { flex-wrap: nowrap; overflow-x: auto; width: 100%; }
+  .top .account { margin-left: 0; }
 }

@@ -64,7 +64,7 @@ async def _report(sessions, what="2 visitors hit it.", level="broken", key=""):
 
 
 def test_adding_a_webhook_shows_the_secret_once_and_on_request(client, db, project):
-    assert "Add webhook" in page_text(client, project)
+    assert "Add webhook" in page_text(client, project, "settings")
     for bad in ("http://hooks.example.com/x", "https://127.0.0.1/x", "https://localhost/x", "https://10.0.0.8/x",
                 "https://user:pw@hooks.example.com/x"):
         answer = client.post(f"/d/{project.page_token}/webhook", data={"url": bad}, follow_redirects=False)
@@ -76,7 +76,7 @@ def test_adding_a_webhook_shows_the_secret_once_and_on_request(client, db, proje
     db.refresh(project)
     assert project.webhook_url == HOOK and project.webhook_secret.startswith("pbwh_")
     assert project.webhook_secret in shown.text
-    page = page_text(client, project)
+    page = page_text(client, project, "settings")
     assert HOOK in page and project.webhook_secret not in page, "the page itself doesn't show the secret"
 
     again = client.post(f"/d/{project.page_token}/webhook/secret")
@@ -142,7 +142,7 @@ def test_retries_back_off_then_give_up_with_the_same_body(client, db, project, r
     assert {r.headers["prodbat-delivery"] for r in receiver.seen} == {d.delivery_id}
     span = d.last_attempt_at - d.created_at
     assert dt.timedelta(hours=20) < span < dt.timedelta(hours=26), "retries spread over about a day"
-    assert "incident.opened gave up · 500" in page_text(client, project), "the page shows the last attempts"
+    assert "incident.opened gave up · 500" in page_text(client, project, "settings"), "the page shows the last attempts"
 
 
 def test_repeated_410_turns_it_off_and_the_page_says_so(db, project, receiver, client):
@@ -154,7 +154,7 @@ def test_repeated_410_turns_it_off_and_the_page_says_so(db, project, receiver, c
     db.refresh(project)
     assert project.webhook_error == webhooks.TURNED_OFF_GONE
     assert all(d.gave_up_at is not None for d in deliveries(db)), "410 isn't retried"
-    page = page_text(client, project)
+    page = page_text(client, project, "settings")
     assert "answered 410 Gone several times" in page and "Send a test to turn it on again" in page
 
     run(lambda sessions: _report(sessions, key="d"), db)
@@ -195,7 +195,7 @@ def test_a_private_address_is_refused_when_sending(db, project, receiver):
 def test_the_test_button_sends_a_test_event(client, db, project, receiver):
     connect(db, project)
     assert client.post(f"/d/{project.page_token}/test-alert").status_code == 200
-    assert "on its way to you@example.com and your webhook" in client.get(f"/d/{project.page_token}?sent=test").text
+    assert "on its way to you@example.com and your webhook" in client.get(f"/d/{project.page_token}/settings?sent=test").text
     deliver(db, receiver)
     body = receiver.bodies()[0]
     assert body["event"] == "test" and body["test"] is True
@@ -233,7 +233,7 @@ async def _down(sessions):
 def test_not_offered_when_the_plan_or_server_has_it_off(client, db, project):
     project.webhook_enabled = False
     db.commit()
-    assert "Add webhook" not in page_text(client, project)
+    assert "Add webhook" not in page_text(client, project, "settings")
     assert client.post(f"/d/{project.page_token}/webhook", data={"url": HOOK}).status_code == 403
     connect(db, project)
     run(_report, db)

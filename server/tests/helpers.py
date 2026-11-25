@@ -129,8 +129,14 @@ def failure(project, visitor, ts, route="/api/save", status=500):
                          route=route, status=status, ts=ts)
 
 
-def page_text(client, project):
-    r = client.get(f"/d/{project.page_token}")
+def page_and_week(client, project):
+    """To do and This week together: the status and what to do, then the numbers, lists and history."""
+    return page_text(client, project) + " " + page_text(client, project, "week")
+
+
+def page_text(client, project, view=""):
+    """The project's page as text: To do, or another view ("week", "settings")."""
+    r = client.get(f"/d/{project.page_token}" + (f"/{view}" if view else ""))
     assert r.status_code == 200
     # Collapse tags and whitespace so assertions read like the page does.
     body = r.text.split("</style>", 1)[1].split("<script>", 1)[0]
