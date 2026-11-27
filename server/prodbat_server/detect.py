@@ -261,16 +261,23 @@ async def visits_stopped(db: AsyncSession, project: Project, now: dt.datetime):
     if rates is None:
         return NOT_LEARNED
     last = await db.scalar(text("select max(ts) from pageviews where project_id = :p"), {"p": project.id})
-    level = traffic.level_for(rates, last, now)
+    if last is None or now - last < traffic.MIN_SILENCE:
+        return None
+    silences = await traffic.past_silences(db, project.id, since, last, excluded)
+    longest = traffic.longest_silence(rates, silences)
+    level = traffic.level_for(rates, last, now, longest)
     if level is None:
         return None
     _, usual = traffic.silence_chance(rates, last, now)
+    before = (f" In the last 4 weeks, no quiet spell went past about {plural(round(longest), 'visit')}."
+              if round(longest) >= 1 else "")
     return {"level": level, "title": "Visitors have stopped being counted",
             "what": f"The last visit was counted {ago(last, now)}. At these hours of the week you normally get about "
-                    f"{plural(round(usual), 'visit')} in that time. "
+                    f"{plural(round(usual), 'visit')} in that time.{before} "
                     "Either the site is not reaching people, or the Prodbat script was removed in a deploy.",
             "who": "Possibly every visitor.", "todo": VISITS_TODO,
-            "started_at": last, "data": {"stream": "visitors", "usual_visits": round(usual, 1)}}
+            "started_at": last, "data": {"stream": "visitors", "usual_visits": round(usual, 1),
+                                         "longest_visits": round(longest, 1)}}
 
 
 async def went_quiet(db: AsyncSession, project: Project, stream: str, table: str, now: dt.datetime) -> dict | None:

@@ -118,3 +118,32 @@ def test_replay_shows_what_each_rule_would_have_said_about_a_quiet_night(db, pro
     assert len(page_views) >= 1  # the rule before 23 Nov called a quiet night an outage
     assert visits == [] and hourly == []
     assert result.visits == 6 and round(result.days) == 2
+
+
+def test_a_bursty_site_must_go_quieter_than_it_ever_has():
+    # 40 visits an hour all afternoon, so 15 quiet minutes is unlikely if visits came one at a time...
+    counts, first, end = daily({h: 40 for h in range(12, 19)}, 28)
+    rates = profile(counts, first, end)
+    noon = end + dt.timedelta(hours=13)
+    assert level_for(rates, noon, noon + dt.timedelta(minutes=15)) == "look"
+    # ...but this site's visits come in bursts, and it has had 20 quiet minutes in an afternoon before.
+    past = [(noon - dt.timedelta(days=3), noon - dt.timedelta(days=3, minutes=-20))]
+    longest = traffic.longest_silence(rates, past)
+    assert round(longest) == 13
+    assert level_for(rates, noon, noon + dt.timedelta(minutes=15), longest) is None
+    assert level_for(rates, noon, noon + dt.timedelta(minutes=35), longest) == "look"  # past 1.5 times that
+    assert level_for(rates, noon, noon + dt.timedelta(minutes=65), longest) == "broken"  # past twice the bar
+
+
+def test_past_silences_leave_out_a_past_outage(db, project):
+    start = floor_hour(NOW) - dt.timedelta(days=2)
+    at = lambda hours: start + dt.timedelta(hours=hours)  # noqa: E731
+    db.add_all([view(project, "a", at(0)), view(project, "b", at(1)), view(project, "c", at(5)),
+                view(project, "d", at(5.1))])
+    db.commit()
+
+    async def go(sessions):
+        async with sessions() as s:
+            return await traffic.past_silences(s, project.id, start, NOW, excluded={at(3)})
+
+    assert run(go, db) == [(at(0), at(1))]  # 1 to 5 covered the outage; 6 minutes is not a silence

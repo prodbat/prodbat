@@ -14,10 +14,16 @@ Once an hour has three or more readings its single busiest one is left out,
 so one launch day does not make every later Tuesday look slow.
 
 `silence_chance` adds up the visits normally expected across exactly the
-hours a silence covered, and gives the chance of none of them arriving.
+hours a silence covered, and gives the chance of none of them arriving, as if
+visits came one at a time. Real visits often come in bursts (a link shared, a
+newsletter, a crawler), which makes long silences more common than that, so a
+silence only counts once it is LONGEST_FACTOR times longer than any the site
+had in the last 4 weeks, measured the same way (`longest_silence`). A steady
+site has no long silences behind it, so it is still seen within minutes; a
+bursty one has to go quiet for longer than it ever has.
 
-Nothing alerts from this yet. `replay` runs it beside the rules in detect.py
-over real history, so its thresholds are set from what it would have said.
+detect.visits_stopped alerts from this. `replay` runs it beside the older
+rules over real history, so its thresholds are set from what it would have said.
 """
 
 import bisect
@@ -43,6 +49,10 @@ TRIM_FROM = 3
 LOOK_CHANCE = 1e-3
 BROKEN_CHANCE = 1e-5
 MIN_SILENCE = dt.timedelta(minutes=10)
+# A silence must miss this many times the visits the longest one of the last 4 weeks missed, and twice that
+# to be broken. The same factor as detect.QUIET_LONGEST_FACTOR; on thesaasdir.com's bursty traffic, 1.0 still
+# gave 3 false alarms in 3 days and 1.25 gave one.
+LONGEST_FACTOR = 1.5
 # visit_hours is recomputed this far back each time, for page views that arrive late; kept this long.
 ROLL_BACK = dt.timedelta(hours=3)
 KEEP = dt.timedelta(days=35)
@@ -137,11 +147,41 @@ def silence_chance(rates: list[float], last: dt.datetime, now: dt.datetime) -> t
     return math.exp(-usual), usual
 
 
-def level_for(rates: list[float] | None, last: dt.datetime | None, now: dt.datetime) -> str | None:
+def longest_silence(rates: list[float], silences: list[tuple[dt.datetime, dt.datetime]]) -> float:
+    """The most visits normally expected across any one of these past silences."""
+    return max((expected(rates, start, end) for start, end in silences), default=0.0)
+
+
+def level_for(rates: list[float] | None, last: dt.datetime | None, now: dt.datetime,
+              longest: float = 0.0) -> str | None:
+    """None, "look" or "broken" for no visit since `last`, given the `longest_silence` of the last 4 weeks."""
     if rates is None or last is None or now - last < MIN_SILENCE:
         return None
-    chance, _ = silence_chance(rates, last, now)
-    return "broken" if chance < BROKEN_CHANCE else "look" if chance < LOOK_CHANCE else None
+    chance, usual = silence_chance(rates, last, now)
+    bar = LONGEST_FACTOR * longest
+    if chance < BROKEN_CHANCE and usual > 2 * bar:
+        return "broken"
+    return "look" if chance < LOOK_CHANCE and usual > bar else None
+
+
+async def past_silences(db: AsyncSession, project_id, since: dt.datetime, until: dt.datetime,
+                        excluded: set[dt.datetime]) -> list[tuple[dt.datetime, dt.datetime]]:
+    """Each stretch of at least MIN_SILENCE between page views from `since` to `until`, except any
+    touching an hour in `excluded` (a past outage, which is not the site's normal)."""
+    rows = (await db.execute(text("""
+        select prev, ts from (select ts, lag(ts) over (order by ts) prev from pageviews
+                              where project_id = :p and ts >= :since and ts < :until) g
+        where ts - prev >= :min"""), {"p": project_id, "since": since, "until": until, "min": MIN_SILENCE})).all()
+    return [(a, b) for a, b in rows if not _touches(a, b, excluded)]
+
+
+def _touches(start: dt.datetime, end: dt.datetime, hours: set[dt.datetime]) -> bool:
+    hour = floor_hour(start)
+    while hour < end:
+        if hour in hours:
+            return True
+        hour += HOUR
+    return False
 
 
 async def excluded_hours(db: AsyncSession, project_id, since: dt.datetime, until: dt.datetime) -> set[dt.datetime]:
@@ -234,7 +274,7 @@ async def replay(db: AsyncSession, project: Project, start: dt.datetime, end: dt
     flat = {"page views (before 23 Nov)": _Flat(views, None), "visits (now)": _Flat(starts, 1.5)}
     rules: dict[str, list[Episode]] = {name: [] for name in [*flat, "hourly pattern"]}
     outage: set[dt.datetime] = set()  # hours the hourly rule called broken, left out of its own baseline
-    cached: tuple[dt.datetime, list[float] | None] | None = None
+    cached: tuple[dt.datetime, list[float] | None, float] | None = None
 
     def note(name: str, level: str | None, now: dt.datetime, last: dt.datetime | None, usual: float | None = None):
         episodes = rules[name]
@@ -257,8 +297,12 @@ async def replay(db: AsyncSession, project: Project, start: dt.datetime, end: dt
         if starts and starts[0] <= t:
             hour = floor_hour(t)
             if cached is None or cached[0] != hour:
-                cached = (hour, profile(counts, starts[0], hour, outage))
-            level = level_for(cached[1], last, t)
+                rates = profile(counts, starts[0], hour, outage)
+                lo, hi = bisect.bisect_left(views, hour - BASELINE), bisect.bisect_left(views, hour)
+                silences = [(a, b) for a, b in zip(views[lo:hi], views[lo + 1:hi])
+                            if b - a >= MIN_SILENCE and not _touches(a, b, outage)]
+                cached = (hour, rates, longest_silence(rates, silences) if rates else 0.0)
+            level = level_for(cached[1], last, t, cached[2])
             if level == "broken":
                 outage.add(hour)
             note("hourly pattern", level, t, last,

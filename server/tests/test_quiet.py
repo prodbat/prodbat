@@ -5,7 +5,7 @@ from sqlalchemy import select, text
 
 from prodbat_server.models import Incident, Payment, Pageview
 
-from prodbat_server.traffic import roll_up
+from prodbat_server.traffic import floor_hour, roll_up
 
 from .helpers import NOW, emails, evaluate, run
 
@@ -115,12 +115,15 @@ def test_with_its_hourly_pattern_learned_a_small_site_s_night_is_still_fine(db, 
 
 
 def test_a_site_that_goes_dark_in_its_busy_hours_is_broken_within_minutes(db, project):
-    # A visit a minute from 12 hours before this time of day to 6 hours after, for a week; nothing at night.
+    # A visit a minute for the 12 whole hours before this hour of the day and 6 after, for a week; nothing
+    # at night. Whole hours, since each hour's rate is an average: a site that stopped dead every day halfway
+    # through an hour would have had a long silence at the start of each night, by that average.
     views = []
     for d in range(1, 8):
-        around = NOW - dt.timedelta(days=d)
+        around = floor_hour(NOW) - dt.timedelta(days=d)
         views += [view_at(project, f"v{d}-{m}", around + dt.timedelta(minutes=m)) for m in range(-720, 360)]
-    views += [view_at(project, f"today-{m}", NOW + dt.timedelta(minutes=m)) for m in range(-720, -20)]
+    views += [view_at(project, f"today-{m}", NOW + dt.timedelta(minutes=m))
+              for m in range(-720 - NOW.minute, -20)]
     db.add_all(views)
     learn(db, project)
     evaluate(db)
