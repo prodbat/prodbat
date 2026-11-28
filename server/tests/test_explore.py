@@ -97,9 +97,9 @@ def test_every_view_works_empty_and_the_overview_links_to_them(client, project):
     for path in ("errors", "logs", "metrics", "uptime", "jobs", "packages"):
         text_of(client, f"/d/{t}/{path}", range="7d")
     overview = client.get(f"/d/{t}").text
-    assert f'href="/d/{t}/errors"' in overview  # Technical details
-    errors = client.get(f"/d/{t}/errors").text
-    assert all(f'href="/d/{t}/{view}"' in errors for view in ("logs", "metrics", "uptime", "jobs", "dependencies"))
+    assert all(f'href="/d/{t}/{view}"' in overview for view in ("errors", "uptime", "logs"))  # Errors, Uptime, More
+    logs = client.get(f"/d/{t}/logs").text
+    assert all(f'href="/d/{t}/{view}"' in logs for view in ("logs", "metrics", "jobs", "dependencies"))
     assert client.get(f"/d/{t}/logs", params={"before": "yesterday"}).status_code == 400
 
 

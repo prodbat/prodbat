@@ -27,7 +27,7 @@
 {% set extra = [('a text' if texts else ''), ('a phone notification' if push else ''), ('a Slack message' if slack else '')] | select | list %}
 <div><b class="bad">Your site breaks</b><span>An email straight away{% if extra %}, and {{ extra[:-1] | join(', ') }}{% if extra | length > 1 %} or {% endif %}{{ extra[-1] }} if you turn {{ 'it' if extra | length == 1 else 'them' }} on below{% endif %}.</span></div>
 <div><b class="look">Something needs a look</b><span>One email. No texts.</span></div>
-<div><b>Every Monday</b><span>A short email: visitors, sales and anything worth doing someday.</span></div>
+<div><b>Every Monday</b><span>A short email: what broke, what was fixed, and anything worth doing someday.</span></div>
 </section>
 
 <section class="card list" id="test-alert">
@@ -38,6 +38,26 @@
 {% if can_test %}<div class="actions"><form method="post" action="/d/{{ token }}/test-alert"><button>Send me a test alert</button></form>{% if github_issues_on %}<span class="muted">GitHub gets a test issue, closed straight away.</span>{% endif %}</div>{% endif %}
 </section>
 
+{% if slack %}
+<section class="card list" id="slack">
+<h2>Slack</h2>
+{% if slack_error %}
+<p><strong>{{ slack_error }}</strong> Alerts still go by email.</p>
+<form method="post" action="/d/{{ token }}/slack" class="actions"><button class="primary">Connect Slack again</button></form>
+{% elif slack_connected %}
+<p>Alerts also go to <strong>{{ slack_channel }}</strong>{% if slack_team %} in {{ slack_team }}{% endif %}. Each problem is one message, and "Working again" replies in its thread.</p>
+<form method="post" action="/d/{{ token }}/slack/remove"><button class="quiet">Disconnect Slack</button></form>
+{% else %}
+<p class="muted">Post alerts to a Slack channel as well as by email. You pick the channel; we only post alerts there.</p>
+<form method="post" action="/d/{{ token }}/slack" class="actions"><button>Add to Slack</button></form>
+{% endif %}
+</section>
+{% endif %}
+
+{% if texts or push or telegram or github or webhook %}
+<details class="developers"{% if sms_to or sms_pending or devices or push_error or telegram_links or telegram_error or telegram_connected or github_choices or gh.github_error or gh.github_repo or gh.github_note or webhook_url %} open{% endif %}>
+<summary>More ways to be alerted: {{ [('text messages' if texts else ''), ('phone notifications' if push else ''), ('Telegram' if telegram else ''), ('GitHub issues' if github else ''), ('webhooks' if webhook else '')] | select | join(', ') }}</summary>
+<div>
 {% if texts %}
 <section class="card list" id="texts">
 <h2>Text messages</h2>
@@ -76,26 +96,6 @@
 </section>
 {% endif %}
 
-{% if slack %}
-<section class="card list" id="slack">
-<h2>Slack</h2>
-{% if slack_error %}
-<p><strong>{{ slack_error }}</strong> Alerts still go by email.</p>
-<form method="post" action="/d/{{ token }}/slack" class="actions"><button class="primary">Connect Slack again</button></form>
-{% elif slack_connected %}
-<p>Alerts also go to <strong>{{ slack_channel }}</strong>{% if slack_team %} in {{ slack_team }}{% endif %}. Each problem is one message, and "Working again" replies in its thread.</p>
-<form method="post" action="/d/{{ token }}/slack/remove"><button class="quiet">Disconnect Slack</button></form>
-{% else %}
-<p class="muted">Post alerts to a Slack channel as well as by email. You pick the channel; we only post alerts there.</p>
-<form method="post" action="/d/{{ token }}/slack" class="actions"><button>Add to Slack</button></form>
-{% endif %}
-</section>
-{% endif %}
-
-{% if telegram or github or webhook %}
-<details class="developers"{% if telegram_links or telegram_error or telegram_connected or github_choices or gh.github_error or gh.github_repo or gh.github_note or webhook_url %} open{% endif %}>
-<summary>For developers: {{ [('Telegram' if telegram else ''), ('GitHub issues' if github else ''), ('webhooks' if webhook else '')] | select | join(', ') }}</summary>
-<div>
 {% if telegram %}
 <section class="card list" id="telegram">
 <h2>Telegram</h2>

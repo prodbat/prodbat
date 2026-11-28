@@ -1,6 +1,6 @@
 # Prodbat
 
-> Monitoring for web apps built with AI coding agents: uptime, errors, checkout and sign-in failures, jobs and queues, security and end-of-life scanning, logs, visitors and Stripe revenue, with plain-English alerts and fix tasks for the coding agent. Open source (AGPL-3.0); this server is at {server}.
+> Error tracking and uptime for web apps built with AI coding agents: quiet by default, plain-English alerts, and fix tasks for the coding agent that are re-checked against the live app. Open source (AGPL-3.0); this server is at {server}.
 
 ## For coding agents
 

@@ -45,7 +45,7 @@ def test_a_quiet_week_says_everything_is_working_with_numbers_and_lists(client, 
     assert "Visitors 3" in text
     assert "Page views 4" in text
     assert "Payments – Stripe is not connected yet" in text
-    assert "Saw an error 0 of 3 visitors" in text
+    assert "Visitors who saw an error 0 of 3 visitors" in text
     assert "Nothing has broken since" in text
     assert "/ 2" in text and "/pricing 2" in text
     # Once a problem has come and gone, the page says when, not since the project began.

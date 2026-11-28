@@ -162,12 +162,12 @@
 <ul class="days">{% for d in days %}<li class="{{ d.state }}" title="{{ d.label }}"><span hidden>{{ d.label }}</span></li>{% endfor %}</ul>
 </div>
 <dl>
-{% for n in page.numbers if n.label in ('Visitors', 'Page views') or (page.payments_connected and n.label in ('Payments', 'Paid')) %}<dt>{{ n.label }}</dt><dd>{{ n.value }}</dd>
-{% endfor %}
+{% for n in page.numbers if n.label == 'Saw an error' %}<dt>Visitors who saw an error</dt><dd>{{ n.value }}</dd>
+{% endfor %}<dt>Site checks</dt><dd>{{ "{:,}".format(checks or 0) }}</dd>
+
 <dt>Alerts go to</dt><dd>{% if alert_email %}Email{% else %}Nowhere yet{% endif %}</dd>
 </dl>
-{% if checks %}<p class="proof">Prodbat has loaded your site {{ "{:,}".format(checks) }} {{ 'time' if checks == 1 else 'times' }}.</p>{% endif %}
-<a href="/d/{{ token }}/week">See {{ page.domain }} this week</a>
+<a href="/d/{{ token }}/errors">See every error</a>
 </aside>
 </div>
 {% endif %}

@@ -12,15 +12,49 @@
 .seen svg { flex: none; margin-top: 2px; }
 .seen div { min-width: 0; overflow-wrap: anywhere; }
 .seen span { display: block; color: var(--muted); font-size: 15px; }
+.more { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+.more > summary { cursor: pointer; padding: 20px 24px; font-weight: 700; font-size: 17px; }
+.more > summary span { font-weight: 400; color: var(--muted); font-size: 15px; }
+.more > div { display: flex; flex-direction: column; gap: 24px; padding: 0 16px 16px; }
 {% endblock %}
 {% block main %}
 <div>
 <h1 class="display">{{ page.domain }} this week</h1>
-<p class="lede">Who came, what they bought and what happened. Nothing here needs you; anything that does is on <a href="/d/{{ token }}">To do</a>.</p>
+<p class="lede">What broke, what was fixed and what Prodbat held back. Nothing here needs you; anything that does is on <a href="/d/{{ token }}">To do</a>.</p>
 </div>
 
 <section class="card numbers" aria-label="This week in numbers">
-{% for n in page.numbers %}<div><span class="muted">{{ n.label }}</span><b>{{ n.value }}</b><span class="muted">{{ n.note }}</span></div>
+{% for n in page.numbers if n.label == 'Saw an error' %}<div><span class="muted">Visitors who saw an error</span><b>{{ n.value }}</b><span class="muted">{{ n.note }}</span></div>
+{% endfor %}<div><span class="muted">Problems fixed</span><b>{{ done | length }}</b><span class="muted">in the last 7 days</span></div>
+<div><span class="muted">Held back</span><b>{{ seen | length }}</b><span class="muted">seen once, not worth an email</span></div>
+<div><span class="muted">Site checks</span><b>{{ "{:,}".format(checks or 0) }}</b><span class="muted">since Prodbat started watching</span></div>
+</section>
+
+<section class="lists">
+<div class="card list">
+<h2>What happened</h2>
+<div class="rows">
+{% for date, sentence in page.happened %}<div class="event"><span class="muted">{{ date }}</span><span>{{ sentence }}</span></div>
+{% else %}<p class="empty">Nothing broke this week.</p>
+{% endfor %}
+</div>
+</div>
+<div class="card list">
+<div class="list-head"><h2>Seen, but not a problem yet</h2></div>
+<p class="muted">Once a visitor each. If more people hit one, it moves to To do.</p>
+<div class="rows">
+{% for problem in seen %}<div class="seen">{{ ring(20) }}<div>{{ problem.title }}<span>{{ problem.detail }}</span></div></div>
+{% else %}<p class="empty">Nothing held back this week.</p>
+{% endfor %}
+</div>
+</div>
+</section>
+
+<details class="more">
+<summary>Visitors and sales <span>who came, from where, and what they bought</span></summary>
+<div>
+<section class="card numbers" aria-label="Visitors and sales in numbers">
+{% for n in page.numbers if n.label != 'Saw an error' %}<div><span class="muted">{{ n.label }}</span><b>{{ n.value }}</b><span class="muted">{{ n.note }}</span></div>
 {% endfor %}
 </section>
 
@@ -74,30 +108,8 @@
 </div>
 {% endif %}
 </section>
+</div>
+</details>
 
-{% if seen or page.happened %}
-<section class="lists">
-{% if page.happened %}
-<div class="card list">
-<h2>What happened</h2>
-<div class="rows">
-{% for date, sentence in page.happened %}<div class="event"><span class="muted">{{ date }}</span><span>{{ sentence }}</span></div>
-{% endfor %}
-</div>
-</div>
-{% endif %}
-{% if seen %}
-<div class="card list">
-<div class="list-head"><h2>Seen, but not a problem yet</h2></div>
-<p class="muted">Once a visitor each. If more people hit one, it moves to To do.</p>
-<div class="rows">
-{% for problem in seen %}<div class="seen">{{ ring(20) }}<div>{{ problem.title }}<span>{{ problem.detail }}</span></div></div>
-{% endfor %}
-</div>
-</div>
-{% endif %}
-</section>
-{% endif %}
-
-{% if page.has_logs %}<p class="muted">Every log line your server sends is in <a href="/d/{{ token }}/logs">Logs</a>, under Technical details.</p>{% endif %}
+{% if page.has_logs %}<p class="muted">Every log line your server sends is in <a href="/d/{{ token }}/logs">Logs</a>, under More.</p>{% endif %}
 {% endblock %}
